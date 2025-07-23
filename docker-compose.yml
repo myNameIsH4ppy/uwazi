@@ -17,6 +17,21 @@ services:
     platform: linux/amd64s
     volumes:
       - ./:/uwazi
+      # If your folder structure is as follows:
+      # .
+      # ├── uwazi
+      # │   ├── latest/
+      # │       ├── docker-compose.yml
+      # │       ├── ...
+      # │   ├── log/
+      # │   ├── uploaded_documents/
+      # │   ├── custom_uploads/
+      # │   ├── temporal_files/
+      # you'd want to mount the volumes like this:
+      # - ../uploaded_documents:/uwazi/uploaded_documents
+      # - ../custom_uploads:/uwazi/custom_uploads
+      # - ../temporal_files:/uwazi/temporal_files
+      # - ../log:/uwazi/log
     ports:
       - '3000:3000'
     networks:
