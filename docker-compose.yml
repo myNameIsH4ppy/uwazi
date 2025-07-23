@@ -1,4 +1,28 @@
 services:
+  uwazi:
+    build:
+      context: .
+      dockerfile: uwazi.Dockerfile
+    container_name: uwazi-server
+    environment:
+      - DBHOST=mongo
+      - REDIS_HOST=redis
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+      - DATABASE_NAME=<my_db_name>
+      - INDEX_NAME=<my_db_name>
+      - NODE_ENV=production
+      - FILES_ROOT_PATH=/uwazi
+    depends_on:
+      - mongo
+    platform: linux/amd64s
+    volumes:
+      - ./:/uwazi
+    ports:
+      - '3000:3000'
+    networks:
+      - uwazi-network
+
+
   elasticsearch:
     build:
       context: .
@@ -8,6 +32,8 @@ services:
       - esdata01:/usr/share/elasticsearch/data
     ports:
       - '9200:9200'
+    networks:
+      - uwazi-network
     environment:
       - bootstrap.memory_lock=true
       - indices.query.bool.max_clause_count=2048
@@ -27,6 +53,8 @@ services:
       nofile:
         soft: "65536"
         hard: "65536"
+    networks:
+      - uwazi-network
 
   mongoreplicaset_start_script:
     image: "mongo:6.0"
@@ -34,6 +62,8 @@ services:
     container_name: mongoreplicaset_start_script
     depends_on:
       - mongo
+    networks:
+      - uwazi-network
     entrypoint:
       - bash
       - -c
@@ -41,7 +71,7 @@ services:
         sleep 1 && mongosh --host mongo:27017 --eval '
         rs.initiate();
         cfg = rs.config();
-        cfg.members[0].host = "localhost:27017";
+        cfg.members[0].host = "mongo:27017";
         rs.reconfig(cfg, {force:true});
         '
 
@@ -53,6 +83,8 @@ services:
       - '6379:6379'
     environment:
       - REDIS_REPLICATION_MODE=master
+    networks:
+      - uwazi-network
 
   minio:
     image: minio/minio
@@ -63,9 +95,15 @@ services:
     volumes:
       - ./storage/minio:/data
     command: server /data --console-address :9001
+    networks:
+      - uwazi-network
 
 volumes:
   esdata01:
     driver: local
   mongodata:
     driver: local
+
+networks:
+  uwazi-network:
+    driver: bridge

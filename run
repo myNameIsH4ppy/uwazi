@@ -3,7 +3,7 @@
 set -eo pipefail
 
 function start {
-  docker-compose up --build -d "${@}"
+  docker compose up --build -d "${@}"
 }
 
 function mongo {
@@ -11,9 +11,14 @@ function mongo {
 }
 
 function stop {
-  docker-compose stop
+  docker compose stop
 }
 
+# I would create the following functions:
+# - backup: to create a backup of the all the data needed
+# - restore: to restore the data from a backup
+# - initialize: to initialize the database
+# - serve: to start the application
 
 function help {
   printf "%s <task> \n\nTasks:\n" "${0}"
