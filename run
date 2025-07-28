@@ -6,6 +6,25 @@ function start {
   docker compose up --build -d "${@}"
 }
 
+# I would create the following functions:
+# - backup: to create a backup of the all the data needed
+# - restore: to restore the data from a backup
+# - rollback: rollback to the previous version
+# - initialize: to initialize the database
+# - serve: to start the application
+
+function install_node_modules {
+  docker exec -it uwazi-server yarn install --immutable
+}
+
+function initialize {
+  docker exec -it uwazi-server yarn blank-state
+}
+
+function serve {
+  docker exec -it uwazi-server node server.js --no-experimental-fetch
+}
+
 function mongo {
   docker exec -it uwazi-mongo mongo localhost/uwazi_development
 }
@@ -13,12 +32,6 @@ function mongo {
 function stop {
   docker compose stop
 }
-
-# I would create the following functions:
-# - backup: to create a backup of the all the data needed
-# - restore: to restore the data from a backup
-# - initialize: to initialize the database
-# - serve: to start the application
 
 function help {
   printf "%s <task> \n\nTasks:\n" "${0}"
