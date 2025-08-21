@@ -61,7 +61,7 @@ This will launch a webpack server and nodemon app server for hot reloading any c
 
 ```
 $ docker exec -it uwazi-server yarn webpack-server
-```
+``` 
 
 This will launch a webpack server. You can also pass `--analyze`to get detailed info on the webpack build.
 
