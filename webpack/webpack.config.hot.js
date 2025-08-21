@@ -28,7 +28,7 @@ config.output = {
 
 config.entry.main = [
   'webpack-hot-middleware/client?path=//localhost:8080/__webpack_hmr',
-  path.join(rootPath, 'app/react/entry-client.tsx'),
+  './app/react/entry-client.tsx',
 ];
 
 config.watchOptions = {

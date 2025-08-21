@@ -5,24 +5,28 @@ services:
       dockerfile: uwazi.Dockerfile
     container_name: uwazi-server
     environment:
-      - DBHOST=mongo
-      - REDIS_HOST=redis
-      - ELASTICSEARCH_URL=http://elasticsearch:9200
-      - DATABASE_NAME=felice #<my_db_name>
-      - INDEX_NAME=felice #<my_db_name>
-      - NODE_ENV=production
-      - FILES_ROOT_PATH=/uwazi
+      - DBHOST=${DBHOST}
+      - REDIS_HOST=${REDIS_HOST}
+      - ELASTICSEARCH_URL=${ELASTICSEARCH_URL}
+      - DATABASE_NAME=${DATABASE_NAME}
+      - INDEX_NAME=${INDEX_NAME}
+      - NODE_ENV=${NODE_ENV}
+      - FILES_ROOT_PATH=${FILES_ROOT_PATH}
+      - CHOKIDAR_USEPOLLING=true
+      - WATCHPACK_POLLING=true
+      - CHOKIDAR_INTERVAL=1000
     depends_on:
       - mongo
     platform: linux/amd64
     volumes:
       - ./:/uwazi
-      - ./uploaded_documents:/uwazi/uploaded_documents
-      - ./custom_uploads:/uwazi/custom_uploads
-      - ./temporal_files:/uwazi/temporal_files
-      - ./log:/uwazi/log
+      - ${UPLOADED_DOCUMENTS}
+      - ${CUSTOM_UPLOADS}
+      - ${TEMPORAL_FILES}
+      - ${LOG}
     ports:
       - '3000:3000'
+      - '8080:8080'
     networks:
       - uwazi-network
 
@@ -33,6 +37,7 @@ services:
     container_name: uwazi-elasticsearch
     volumes:
       - esdata01:/usr/share/elasticsearch/data
+      - ${ES_BACKUP_PATH}
     ports:
       - '9200:9200'
     networks:
@@ -43,6 +48,7 @@ services:
       - discovery.type=single-node
       - 'ES_JAVA_OPTS=-Xms2g -Xmx2g'
       - cluster.routing.allocation.disk.threshold_enabled=false
+      - path.repo=/usr/share/elasticsearch/backup
 
   mongo:
     image: 'mongo:6.0'
@@ -50,6 +56,7 @@ services:
     command: mongod --replSet "uwazi_replica_set"
     volumes:
       - mongodata:/data/db
+      - ${MONGO_DUMP_PATH}
     ports:
       - '27017:27017'
     ulimits:

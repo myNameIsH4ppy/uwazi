@@ -130,7 +130,7 @@ DB.connect(config.DBHOST, config.DBAUTH).then(async () => {
       if (shouldMigrate) {
         console.error(
           '\x1b[33m%s\x1b[0m',
-          '==> Your database needs to be migrated, please run:\n\n yarn migrate & yarn reindex\n\n'
+          '==> Your database needs to be migrated, please run:\n\n ./uwazi migrate\n\n'
         );
         process.exit(1);
       }

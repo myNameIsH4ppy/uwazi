@@ -14,22 +14,16 @@ Read the [user guide](https://uwazi.io/page/9852italrtk/support)
 
 # Installation guide
 
-- [Dependencies](#dependencies)
+- [Requirements](#requirements)
 - [Production](#production)
 - [Development](#development)
 
-# Dependencies
+# Requirements
 
-Before anything else you will need to install the application dependencies:
+Since Uwazi can now be deployed using Docker for easier setup and reproducibility, you just need to install:
 
-- **NodeJs >= 20.9.0** For ease of update, use [nvm](https://github.com/creationix/nvm).
-- [**ElasticSearch 7.17.7**](https://www.elastic.co/downloads/past-releases/elasticsearch-7-17-6) Please note that ElasticSearch requires Java. Follow the instructions to install the package manually, you also probably need to disable ml module in the ElasticSearch config file:
-  `xpack.ml.enabled: false`
-- [**ICU Analysis Plugin (recommended)**](https://www.elastic.co/guide/en/elasticsearch/plugins/current/analysis-icu.html#analysis-icu) Adds support for number sorting in texts and solves other language sorting nuances. This option is activated by setting the env var USE_ELASTIC_ICU=true before running the server (defaults to false/unset).
-- [**MongoDB 6.0**](https://www.mongodb.com/docs/v5.0/installation/) The MongoDB installation needs to be configured as a Replica Set. It can be a single-node replica set, but Replica Set must be [initialized](https://www.mongodb.com/docs/v6.0/tutorial/deploy-replica-set/). If you have a previous version installed, please follow the instructions on how to [upgrade here](https://www.mongodb.com/docs/manual/release-notes/5.0-upgrade-standalone/).
-- [**mongosh**](https://www.mongodb.com/docs/mongodb-shell/) The new mongosh dependency needs to be added.
-- [**Yarn**](https://yarnpkg.com/en/docs/install)
-- **pdftotext (Poppler)** tested to work on version 0.86 but it's recommended to use the [latest available for your platform](https://poppler.freedesktop.org/). Make sure to **install libjpeg-dev** if you build from source.
+- [Docker](https://docs.docker.com/get-docker/)
+- [Docker Compose](https://docs.docker.com/compose/)
 
 # Production
 
@@ -42,30 +36,23 @@ If you want to use the latest development code:
 ```
 $ git clone https://github.com/huridocs/uwazi.git
 $ cd uwazi
-$ yarn install
-$ yarn blank-state
+```
+Before deploying the containers you might want to take a look to the `.env.development` file, it contains few variables you might want to change, i.e. `DATABASE_NAME` and `INDEX_NAME`.
+
+
+Now you need to build your Docker images by specifying if you're using them for `development` or `production` environment:
+
+```
+$ ./uwazi start development
+$ ./uwazi setup
 ```
 
-There may be an issue with pngquant not running correctly. If you encounter this issue, you are probably missing the library **libpng-dev**. Please run:
-
-```
-$ sudo rm -rf node_modules
-$ sudo apt-get install libpng-dev
-$ yarn install
-```
-
-### Docker
-
-Infrastructure dependencies (ElasticSearch, ICU Analysis Plugin, MongoDB, Redis and Minio (S3 storage) can be installed and run via Docker Compose. ElasticSearch container will claim 2Gb of memory so be sure your Docker Engine is alloted at least 3Gb of memory (for Mac and Windows users).
-
-```shell
-$ ./run start
-```
+This will also start the containers and it also sets things up, like installing all the modules needed for making the uwazi server run and creating a blank state with the database name specified into the `.env.development` file.
 
 ### Development Run
 
 ```
-$ yarn hot
+$ docker exec uwazi-server yarn hot
 ```
 
 This will launch a webpack server and nodemon app server for hot reloading any changes you make.
@@ -73,7 +60,7 @@ This will launch a webpack server and nodemon app server for hot reloading any c
 ### Webpack server
 
 ```
-$ yarn webpack-server
+$ docker exec uwazi-server yarn webpack-server
 ```
 
 This will launch a webpack server. You can also pass `--analyze`to get detailed info on the webpack build.

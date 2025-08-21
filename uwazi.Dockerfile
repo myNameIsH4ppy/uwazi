@@ -1,16 +1,19 @@
-FROM redhat/ubi8:latest
+# FROM redhat/ubi8:latest
+FROM ubuntu:24.04
 
 ENV WRK_DIR=uwazi
 
-# Install useful tools and get UWAZI latest version
-RUN curl -o epel-release.rpm https://dl.fedoraproject.org/pub/epel/epel-release-latest-8.noarch.rpm && \
-    dnf install -y epel-release.rpm && \
-    rm -f epel-release.rpm && \
-    dnf install -y wget tar curl gnupg poppler-utils && \
-    dnf module install -y nodejs:20 && \
+RUN apt update && apt install -y sendmail
+
+# Install useful tools and get Uwazi latest version
+RUN apt-get update && \
+    apt-get install -y curl wget gnupg lsb-release ca-certificates software-properties-common poppler-utils tar && \
+    curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
+    apt-get install -y nodejs && \
     npm install --global yarn && \
     mkdir /${WRK_DIR} && \
-    dnf clean all
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 
 # Install mongosh
 RUN curl -LO https://downloads.mongodb.com/compass/mongosh-2.0.2-linux-x64.tgz && \
@@ -20,11 +23,11 @@ RUN curl -LO https://downloads.mongodb.com/compass/mongosh-2.0.2-linux-x64.tgz &
     rm -f mongosh-2.0.2-linux-x64.tgz
 
 # Install mongorestore (MongoDB tools)
-RUN curl -LO https://fastdl.mongodb.org/tools/db/mongodb-database-tools-rhel80-x86_64-100.9.4.tgz && \
-    tar -xzf mongodb-database-tools-rhel80-x86_64-100.9.4.tgz && \
-    mv mongodb-database-tools-rhel80-x86_64-100.9.4 /opt/mongodb-tools && \
+RUN curl -LO https://fastdl.mongodb.org/tools/db/mongodb-database-tools-ubuntu2004-x86_64-100.9.4.tgz && \
+    tar -xzf mongodb-database-tools-ubuntu2004-x86_64-100.9.4.tgz && \
+    mv mongodb-database-tools-ubuntu2004-x86_64-100.9.4 /opt/mongodb-tools && \
     ln -s /opt/mongodb-tools/bin/* /usr/local/bin/ && \
-    rm mongodb-database-tools-rhel80-x86_64-100.9.4.tgz
+    rm mongodb-database-tools-ubuntu2004-x86_64-100.9.4.tgz
 
 WORKDIR /${WRK_DIR}
 

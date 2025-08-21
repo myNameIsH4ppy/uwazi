@@ -1,0 +1,77 @@
+#!/bin/bash
+
+set -eo pipefail
+
+function start {
+  ENV="$1"
+
+  if [ "$ENV" != "production" ] && [ "$ENV" != "development" ]; then
+      echo "Command usage: $0 <environment>"
+      echo "Error: Environment must be 'production' or 'development'."
+      return 1
+  fi
+
+  # Start docker compose based on the environment
+  docker compose --env-file .env.$ENV up --build -d
+}
+
+function setup {
+  # Install yarn dependencies if not already installed
+  docker exec uwazi-server test -d /uwazi/node_modules || \
+    docker exec uwazi-server yarn install --immutable
+
+  # Initialize the blank state of the application
+  docker exec uwazi-server yarn blank-state
+}
+
+function serve {
+  docker exec "$@" uwazi-server node server.js --no-experimental-fetch
+}
+
+function migrate {
+  docker exec uwazi-server yarn migrate & yarn reindex
+}
+
+function mongo {
+  docker exec -it uwazi-mongo mongo localhost/uwazi_development
+}
+
+function backup {
+  # Snapshot name with date and time
+  SNAPSHOT_NAME="snapshot_$(date +%Y%m%d_%H%M%S)"
+
+  # Backup the MongoDB data
+  docker exec uwazi-mongo mongodump --out=/data/dump/$SNAPSHOT_NAME
+}
+
+function restore {
+  # Snapshot name with date and time
+  SNAPSHOT_NAME="$1"
+
+  if [ -z "$SNAPSHOT_NAME" ]; then
+      echo "Command usage: $0 <snapshot_name>"
+      echo "Error: Snapshot name must be provided."
+      return 1
+  fi
+
+  # Restore the MongoDB data
+  docker exec uwazi-mongo mongorestore --drop /data/dump/$SNAPSHOT_NAME
+
+  # Reindex the Elasticsearch data
+  docker exec uwazi-server yarn reindex
+}
+
+function stop {
+  docker compose --env-file .env.production stop
+}
+
+function clean {
+  docker compose --env-file .env.production down --volumes --remove-orphans
+}
+
+function help {
+  printf "%s <task> \n\nTasks:\n" "${0}"
+  compgen -A function | grep -v "^_" | cat -n
+}
+
+USER_ID=$(id -u) GROUP_ID=$(id -g) "${@:-help}"

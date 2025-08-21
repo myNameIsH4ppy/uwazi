@@ -37,7 +37,7 @@ module.exports = production => {
       },
     },
     entry: {
-      main: path.join(rootPath, 'app/react/entry-client'),
+      main: path.join(rootPath, 'app/react/entry-client.tsx'),
       nprogress: path.join(rootPath, 'node_modules/nprogress/nprogress.js'),
     },
     output: {
@@ -139,9 +139,9 @@ module.exports = production => {
     },
     plugins: [
       process.env.CYPRESS &&
-        new webpack.ProvidePlugin({
-          process: 'process/browser',
-        }),
+      new webpack.ProvidePlugin({
+        process: 'process/browser',
+      }),
       new NodePolyfillPlugin({ includeAliases: ['path', 'url', 'util', 'Buffer'] }),
       new CleanWebpackPlugin(),
       new MiniCssExtractPlugin({

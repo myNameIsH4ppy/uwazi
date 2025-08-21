@@ -19,7 +19,9 @@ cp ./package.json ./prod/package.json
 cp -R ./contents ./prod/contents
 cp *.Dockerfile ./prod
 cp docker-compose.yml ./prod/docker-compose.yml
-cp ./run ./prod/run
+cp ./uwazi ./prod/uwazi
+cp .env.production ./prod/.env.production
+cp .env.development ./prod/.env.development
 yarn install --production=true --modules-folder=./prod/node_modules
 mkdir ./prod/log
 mkdir ./prod/uploaded_documents
