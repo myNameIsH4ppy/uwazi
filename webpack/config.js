@@ -10,6 +10,7 @@ const { BundleAnalyzerPlugin } = require('webpack-bundle-analyzer');
 const MonacoWebpackPlugin = require('monaco-editor-webpack-plugin');
 
 const rootPath = path.join(__dirname, '/../');
+// const rootPath = '/uwazi';
 const myArgs = process.argv.slice(2);
 const analyzerMode = myArgs.indexOf('--analyze') !== -1 ? 'static' : 'disabled';
 
@@ -37,7 +38,7 @@ module.exports = production => {
       },
     },
     entry: {
-      main: path.join(rootPath, 'app/react/entry-client.tsx'),
+      main: path.join(rootPath, 'app/react/entry-client'),
       nprogress: path.join(rootPath, 'node_modules/nprogress/nprogress.js'),
     },
     output: {

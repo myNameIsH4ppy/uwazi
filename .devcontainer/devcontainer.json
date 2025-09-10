@@ -1,0 +1,19 @@
+{
+  "name": "Uwazi Dev Container",
+  "dockerComposeFile": "../docker-compose.dev.yml",
+  "service": "uwazi",
+  "workspaceFolder": "/uwazi",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-vscode.vscode-typescript-next",
+        "esbenp.prettier-vscode"
+      ],
+      "settings": {
+        "terminal.integrated.shell.linux": "/bin/bash"
+      }
+    }
+  },
+  "runServices": ["uwazi","elasticsearch","mongo","mongoreplicaset_start_script","redis","minio"], 
+  "postCreateCommand": ""
+}

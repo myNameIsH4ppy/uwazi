@@ -5,28 +5,24 @@ services:
       dockerfile: uwazi.Dockerfile
     container_name: uwazi-server
     environment:
-      - DBHOST=${DBHOST}
-      - REDIS_HOST=${REDIS_HOST}
-      - ELASTICSEARCH_URL=${ELASTICSEARCH_URL}
-      - DATABASE_NAME=${DATABASE_NAME}
-      - INDEX_NAME=${INDEX_NAME}
-      - NODE_ENV=${NODE_ENV}
-      - FILES_ROOT_PATH=${FILES_ROOT_PATH}
+      - DBHOST=mongo
+      - REDIS_HOST=redis
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+      - DATABASE_NAME=development_db
+      - INDEX_NAME=development_db
+      - NODE_ENV=development
+      - FILES_ROOT_PATH=/uwazi
       - CHOKIDAR_USEPOLLING=true
     depends_on:
       - mongo
     platform: linux/amd64
     working_dir: /uwazi
     volumes:
-      # - ./:/uwazi
-      # - ${UPLOADED_DOCUMENTS}:/uwazi/uploaded_documents
-      # - ${CUSTOM_UPLOADS}:/uwazi/custom_uploads
-      # - ${TEMPORAL_FILES}:/uwazi/temporal_files
-      # - ${LOG}:/uwazi/log
-      - ${UPLOADED_DOCUMENTS:-./uploaded_documents}:/uwazi/uploaded_documents
-      - ${CUSTOM_UPLOADS:-./custom_uploads}:/uwazi/custom_uploads
-      - ${TEMPORAL_FILES:-./temporal_files}:/uwazi/temporal_files
-      - ${LOG:-./log}:/uwazi/log
+      - ./:/uwazi:cached
+      # - ./uploaded_documents:/uwazi/uploaded_documents:delegated
+      # - ./custom_uploads:/uwazi/custom_uploads:delegated
+      # - ./temporal_files:/uwazi/temporal_files:delegated
+      # - ./log:/uwazi/log:delegated
     ports:
       - '3000:3000'
       - '8080:8080'
@@ -41,7 +37,7 @@ services:
     mem_limit: 4g
     volumes:
       - esdata01:/usr/share/elasticsearch/data
-      - ${ES_BACKUP_PATH}:/usr/share/elasticsearch/backup
+      - ./es_backup:/usr/share/elasticsearch/backup
     ports:
       - '9200:9200'
     networks:
@@ -61,7 +57,7 @@ services:
     command: mongod --replSet "uwazi_replica_set"
     volumes:
       - mongodata:/data/db
-      - ${MONGO_DUMP_PATH}:/data/dump
+      - ./mongo_backup:/data/dump
     ports:
       - '27017:27017'
     ulimits:

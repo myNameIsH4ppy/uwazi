@@ -5,6 +5,7 @@ const webpack = require('webpack');
 const config = require('./config')();
 
 const rootPath = `${__dirname}/../`;
+// const rootPath = '/uwazi';
 const RtlCssPlugin = require('rtlcss-webpack-plugin');
 
 config['infrastructureLogging'] = {
@@ -28,10 +29,11 @@ config.output = {
 
 config.entry.main = [
   'webpack-hot-middleware/client?path=//localhost:8080/__webpack_hmr',
-  './app/react/entry-client.tsx',
+  path.join(rootPath, 'app/react/entry-client.tsx'),
 ];
 
 config.watchOptions = {
+  poll: 5000,
   ignored: '**/node_modules/*',
 };
 
