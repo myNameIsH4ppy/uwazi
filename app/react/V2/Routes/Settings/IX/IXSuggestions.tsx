@@ -1,12 +1,11 @@
 /* eslint-disable max-lines */
 /* eslint-disable max-statements */
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { IncomingHttpHeaders } from 'http';
 import {
   LoaderFunction,
   useLoaderData,
   useLocation,
-  useNavigate,
   useRevalidator,
   useSearchParams,
 } from 'react-router';
@@ -21,12 +20,10 @@ import { notificationAtom } from 'V2/atoms';
 import { Translate } from 'app/I18N';
 import { ClientPropertySchema } from 'app/istore';
 import { FunnelIcon } from '@heroicons/react/24/solid';
-import { FeatureToggle } from 'V2/Components/UI/FeatureToggle';
 import { SuggestionsTitle } from './components/SuggestionsTitle';
 import { FiltersSidepanel } from './components/FiltersSidepanel';
 import { suggestionsTableColumnsBuilder } from './components/TableElements';
-import { SuggestionSidepanel } from './components/SuggestionSidepanel';
-import { generateChildrenRows, formatAccepted, updateSortingUrl } from './helpers';
+import { generateChildrenRows, formatAccepted } from './helpers';
 import {
   TableSuggestion,
   MultiValueSuggestion,
@@ -36,7 +33,9 @@ import {
   EntitySuggestion,
 } from './types';
 import { useEventHandler } from './hooks/useEventHandler';
-import { ixAcceptedSuggestions } from './components/ixSuggestionsAtom';
+import { acceptedSuggestions } from './components/atoms';
+import { PDFSidepanel } from './components/PDFSidepanel';
+import { PropertySidepanel } from './components/PropertySidepanel';
 
 const SUGGESTIONS_PER_PAGE = 100;
 
@@ -47,6 +46,17 @@ const ixmessages = {
   processing_suggestions: 'Finding suggestions...',
   cancel: 'Canceling...',
   error: 'Error',
+};
+
+const getDefaultSorting = (searchParams: URLSearchParams): SortingState => {
+  if (searchParams?.get('sort')) {
+    const { property: sortingProperty, order } = JSON.parse(searchParams.get('sort') || '') as {
+      property: string;
+      order: string;
+    };
+    return [{ id: sortingProperty, desc: order === 'desc' && true }];
+  }
+  return [];
 };
 
 const IXSuggestions = () => {
@@ -60,8 +70,6 @@ const IXSuggestions = () => {
     total,
     activeFilters,
   } = useLoaderData() as IXSuggestionsLoaderResponse;
-  const prevSuggestions = useRef(suggestions);
-  const keepRowOrder = useRef(true);
   const [currentSuggestions, setCurrentSuggestions] = useState<TableSuggestion[]>(suggestions);
   const [property, setProperty] = useState<ClientPropertySchema>();
   const [sidepanel, setSidepanel] = useState<'filters' | 'pdf' | 'property' | 'none'>('none');
@@ -71,20 +79,17 @@ const IXSuggestions = () => {
     data?: { processed: number; total: number };
   }>({ status: currentStatus });
   const [selected, setSelected] = useState<TableSuggestion[]>([]);
-  const [sorting, setSorting] = useState<SortingState>([]);
   const location = useLocation();
-  const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [sidepanelSuggestion, setSidepanelSuggestion] = useState<TableSuggestion>();
   const { revalidate } = useRevalidator();
   const setNotifications = useSetAtom(notificationAtom);
-  const setAcceptedSuggestionsAtom = useSetAtom(ixAcceptedSuggestions);
+  const setAcceptedSuggestionsAtom = useSetAtom(acceptedSuggestions);
 
   const filteredTemplates = () =>
     templates ? templates.filter(template => extractor.templates.includes(template._id)) : [];
 
   const onEntitySave = async () => {
-    keepRowOrder.current = true;
     await revalidate();
   };
 
@@ -92,7 +97,6 @@ const IXSuggestions = () => {
     const preparedSuggestions = formatAccepted(suggestionsToAccept);
 
     try {
-      keepRowOrder.current = true;
       await suggestionsAPI.accept(preparedSuggestions);
       const newAcceptedIds = suggestionsToAccept.map(s => s._id);
       setAcceptedSuggestionsAtom(prev => {
@@ -117,10 +121,9 @@ const IXSuggestions = () => {
 
   const findSuggestions = async (suggestionsToFind: TableSuggestion[]) => {
     try {
-      await suggestionsAPI.findSelectedSuggestions(
-        extractor._id!,
-        suggestionsToFind.map(s => s._id)
-      );
+      await suggestionsAPI.findSelectedSuggestions(extractor._id!, [
+        ...new Set(suggestionsToFind.map(s => s.sharedId)),
+      ]);
       await revalidate();
       if (status.status === ixStatus.ready) {
         setStatus({
@@ -150,7 +153,6 @@ const IXSuggestions = () => {
 
   const trainModelOrCancelAction = async () => {
     try {
-      keepRowOrder.current = false;
       if (status.status === ixStatus.ready) {
         await suggestionsAPI.findSuggestions(extractor._id!);
         setStatus({ status: ixStatus.sending_labeled_data });
@@ -185,12 +187,29 @@ const IXSuggestions = () => {
     setSidepanel('none');
   };
 
-  useEffect(() => {
-    keepRowOrder.current = false;
-    const navigatePromise = async (path: string) => navigate(path, { replace: true });
-    const newUrl = updateSortingUrl(sorting, location.pathname, searchParams);
-    navigatePromise(newUrl).catch(_e => {});
-  }, [sorting, searchParams]);
+  const handleSorting = (sortingState: SortingState) => {
+    if (sortingState.length === 0) {
+      if (searchParams.has('sort')) {
+        setSearchParams(prev => {
+          const newSearchParams = new URLSearchParams(prev);
+          newSearchParams.delete('sort');
+          return newSearchParams;
+        });
+      }
+    } else {
+      const sortingObject = sortingState[0];
+      const sortingParams = {
+        property: sortingObject.id || '',
+        order: sortingObject.desc ? 'desc' : 'asc',
+      };
+
+      setSearchParams(prev => {
+        const newSearchParams = new URLSearchParams(prev);
+        newSearchParams.set('sort', JSON.stringify(sortingParams));
+        return newSearchParams;
+      });
+    }
+  };
 
   useEffect(() => {
     const template = templates.find(t => t._id === extractor.templates[0]);
@@ -202,31 +221,15 @@ const IXSuggestions = () => {
   }, [templates, extractor]);
 
   useEffect(() => {
-    let newSuggestions = suggestions;
-
-    if (keepRowOrder.current) {
-      newSuggestions = prevSuggestions.current.map(currentSuggestion => {
-        const updatedSuggestion = suggestions.find(
-          newSuggestion => newSuggestion._id === currentSuggestion._id
-        );
-        return updatedSuggestion || currentSuggestion;
-      });
-    }
-
     if (property?.type === 'multiselect' || property?.type === 'relationship') {
-      const flatenedSuggestions = newSuggestions.map(suggestion =>
-        generateChildrenRows(suggestion as MultiValueSuggestion)
+      setCurrentSuggestions(() =>
+        suggestions.map(suggestion => generateChildrenRows(suggestion as MultiValueSuggestion))
       );
-      setCurrentSuggestions(flatenedSuggestions);
     } else {
       setCurrentSuggestions(
-        newSuggestions.map(
-          suggestion => ({ ...suggestion, isChild: false }) as SingleValueSuggestion
-        )
+        suggestions.map(suggestion => ({ ...suggestion, isChild: false }) as SingleValueSuggestion)
       );
     }
-
-    prevSuggestions.current = newSuggestions;
   }, [suggestions, property, extractor]);
 
   useEffect(() => () => setAcceptedSuggestionsAtom(new Set()), [setAcceptedSuggestionsAtom]);
@@ -252,14 +255,16 @@ const IXSuggestions = () => {
               acceptSuggestions,
               openSidepanel
             )}
-            sortingFn={sortingState => {
-              setSorting(sortingState);
-            }}
-            onChange={({ selectedRows }) => {
+            onSelect={({ selectedRows }) => {
               setSelected(() =>
                 currentSuggestions.filter(current => current.rowId in selectedRows)
               );
             }}
+            onSort={({ sortingState }) => {
+              handleSorting(sortingState);
+            }}
+            manualSorting
+            defaultSorting={getDefaultSorting(searchParams)}
             header={
               <SuggestionsTitle property={extractor.property} templates={filteredTemplates()} />
             }
@@ -304,31 +309,32 @@ const IXSuggestions = () => {
         <SettingsContent.Footer className="flex gap-2" highlighted={selected.length > 0}>
           {selected.length ? (
             <div className="flex items-center justify-center space-x-4">
-              <FeatureToggle feature="devProcessSelected">
-                <Button
-                  size="small"
-                  type="button"
-                  styling="outline"
-                  disabled={
-                    status.status === ixStatus.sending_labeled_data ||
-                    status.status === ixStatus.processing_model
-                  }
-                  onClick={async () => {
-                    await findSuggestions(selected);
-                  }}
-                >
-                  <Translate>Find suggestions</Translate>
-                </Button>
-              </FeatureToggle>
               <Button
                 size="small"
                 type="button"
                 styling="outline"
+                disabled={
+                  status.status === ixStatus.sending_labeled_data ||
+                  status.status === ixStatus.processing_model
+                }
+                onClick={async () => {
+                  await findSuggestions(selected);
+                }}
+              >
+                <Translate>Find suggestions</Translate>
+              </Button>
+              <Button
+                size="small"
+                type="button"
+                styling="outline"
+                disabled={selected.some(
+                  s => s.state.obsolete || s.state.error || s.state.processing
+                )}
                 onClick={async () => {
                   await acceptSuggestions(selected);
                 }}
               >
-                <Translate>Accept suggestion</Translate>
+                <Translate>Accept suggestions</Translate>
               </Button>
               <div className="text-sm font-semibold text-center text-gray-900">
                 <span className="font-light text-gray-500">
@@ -386,8 +392,16 @@ const IXSuggestions = () => {
         aggregation={aggregation}
       />
 
-      <SuggestionSidepanel
-        showSidepanel={sidepanel === 'pdf' || sidepanel === 'property'}
+      <PropertySidepanel
+        showSidepanel={sidepanel === 'property'}
+        property={property}
+        setShowSidepanel={closeSidepanel}
+        suggestion={sidepanelSuggestion}
+        onEntitySave={onEntitySave}
+      />
+
+      <PDFSidepanel
+        showSidepanel={sidepanel === 'pdf'}
         property={property}
         setShowSidepanel={closeSidepanel}
         suggestion={sidepanelSuggestion}
@@ -430,12 +444,10 @@ const IXSuggestionsLoader =
     const aggregation = await suggestionsAPI.aggregation(extractorId, headers);
     const currentStatus = await suggestionsAPI.status(extractorId, headers);
     const templates = await templatesAPI.get(headers);
-
     const suggestions = suggestionsList.suggestions.map(suggestion => ({
       ...suggestion,
       rowId: suggestion._id,
-      disableRowSelection:
-        suggestion.state.obsolete || suggestion.state.processing || suggestion.state.error,
+      disableRowSelection: suggestion.state.processing,
       extractorSource: extractors[0].source,
     }));
 

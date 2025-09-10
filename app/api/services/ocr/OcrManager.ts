@@ -1,14 +1,14 @@
 import { files, storage } from 'api/files';
 import { generateFileName, temporalFilesPath } from 'api/files/filesystem';
 import { processDocument } from 'api/files/processDocument';
-import relationships from 'api/relationships';
+import relationships from 'api/relationships/relationships';
 import { ResultsMessage, TaskManager } from 'api/services/tasksmanager/TaskManager';
 import settings from 'api/settings/settings';
 import { emitToTenant } from 'api/socketio/setupSockets';
 import { tenants } from 'api/tenants/tenantContext';
 import createError from 'api/utils/Error';
-import { LanguageUtils } from 'shared/language';
 import { handleError } from 'api/utils/handleError';
+import { LanguageUtils } from 'shared/language';
 // eslint-disable-next-line node/no-restricted-import
 import { createReadStream, createWriteStream } from 'fs';
 import request from 'shared/JSONRequest';
@@ -227,5 +227,12 @@ class OcrManager {
   }
 }
 
-const ocrManager = new OcrManager();
-export { ocrManager, OcrManager, isEnabled as isOcrEnabled, getStatus as getOcrStatus };
+let manager: OcrManager;
+
+const ocrManager = () => {
+  if (!manager) {
+    manager = new OcrManager();
+  }
+  return manager;
+};
+export { getStatus as getOcrStatus, isEnabled as isOcrEnabled, ocrManager, OcrManager };

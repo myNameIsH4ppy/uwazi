@@ -62,6 +62,7 @@ export const ValuesSelectionSuggestionSchema = {
         properties: {
           id: { type: 'string', minLength: 1 },
           label: { type: 'string', minLength: 1 },
+          segment_text: { type: 'string' },
         },
         required: ['id', 'label'],
       },
@@ -96,6 +97,27 @@ export const IXSuggestionStateSchema = {
   ],
 };
 
+export const IXSuggestionsModelDataSchema = {
+  type: 'object',
+  additionalProperties: false,
+  title: 'IXSuggestionsModelData',
+  properties: {
+    findSuggestionsRunTimestamp: { type: 'number' },
+  },
+};
+
+export const suggestionOptionValueSchema = {
+  type: 'object',
+  title: 'SuggestionOptionValue',
+  required: ['id'],
+  additionalProperties: false,
+  properties: {
+    id: { type: 'string', minLength: 1 },
+    label: { type: 'string' },
+    segment: { type: 'string' },
+  },
+};
+
 export const IXSuggestionSchema = {
   type: 'object',
   additionalProperties: false,
@@ -105,6 +127,7 @@ export const IXSuggestionSchema = {
     propertyTypes,
     propertyValueSchema,
     IXSuggestionStateSchema,
+    suggestionOptionValueSchema,
   },
   properties: {
     _id: objectIdSchema,
@@ -124,6 +147,10 @@ export const IXSuggestionSchema = {
           type: 'array',
           items: propertyValueSchema,
         },
+        {
+          type: 'array',
+          items: suggestionOptionValueSchema,
+        },
       ],
     },
     suggestedText: { type: 'string' },
@@ -132,7 +159,8 @@ export const IXSuggestionSchema = {
     page: { type: 'number', minimum: 1 },
     status: { type: 'string', enum: ['processing', 'failed', 'ready'] },
     state: IXSuggestionStateSchema,
-    date: { type: 'number' },
+    date: { type: ['number', 'null'] },
+    modelData: IXSuggestionsModelDataSchema,
     error: { type: 'string' },
     selectionRectangles: selectionRectanglesSchema,
     trainingSample: { type: 'boolean' },
@@ -161,7 +189,13 @@ export const EntitySuggestionSchema = {
   type: 'object',
   additionalProperties: false,
   title: 'EntitySuggestionType',
-  definitions: { objectIdSchema, propertyTypes, propertyValueSchema, IXSuggestionStateSchema },
+  definitions: {
+    objectIdSchema,
+    propertyTypes,
+    propertyValueSchema,
+    IXSuggestionStateSchema,
+    suggestionOptionValueSchema,
+  },
   properties: {
     _id: objectIdSchema,
     entityId: { type: 'string', minLength: 1 },
@@ -225,8 +259,19 @@ export const SuggestionCustomFilterSchema = {
     nonLabeled: { type: 'boolean' },
     obsolete: { type: 'boolean' },
     error: { type: 'boolean' },
+    noContext: { type: 'boolean' },
+    nonProcessed: { type: 'boolean' },
   },
-  required: ['labeled', 'nonLabeled', 'match', 'mismatch', 'obsolete', 'error'],
+  required: [
+    'labeled',
+    'nonLabeled',
+    'match',
+    'mismatch',
+    'obsolete',
+    'error',
+    'noContext',
+    'nonProcessed',
+  ],
 };
 
 export const SuggestionsQueryFilterSchema = {
@@ -285,7 +330,17 @@ export const IXSuggestionAggregationSchema = {
   type: 'object',
   title: 'IXSuggestionAggregation',
   additionalProperties: false,
-  required: ['total', 'labeled', 'nonLabeled', 'match', 'mismatch', 'obsolete', 'error'],
+  required: [
+    'total',
+    'labeled',
+    'nonLabeled',
+    'match',
+    'mismatch',
+    'obsolete',
+    'error',
+    'noContext',
+    'nonProcessed',
+  ],
   properties: {
     total: { type: 'number' },
     labeled: { type: 'number' },
@@ -294,5 +349,7 @@ export const IXSuggestionAggregationSchema = {
     mismatch: { type: 'number' },
     obsolete: { type: 'number' },
     error: { type: 'number' },
+    noContext: { type: 'number' },
+    nonProcessed: { type: 'number' },
   },
 };

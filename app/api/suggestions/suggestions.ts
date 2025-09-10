@@ -16,6 +16,7 @@ import {
   propertyTypeIsWithoutExtractedMetadata,
 } from 'api/services/informationextraction/ixMaterials';
 import { ArrayUtils } from 'api/common.v2/utils/Array';
+import { IXModelType } from 'shared/types/IXModelType';
 import { registerEventListeners } from './eventListeners';
 import { updateStates } from './updateState';
 import {
@@ -95,6 +96,70 @@ const Suggestions = {
   getByEntityId: async (sharedId: string) => IXSuggestionsModel.get({ entityId: sharedId }),
   getByExtractor: async (extractorId: ObjectIdSchema) => IXSuggestionsModel.get({ extractorId }),
 
+  // Balanced sampling for suggestion finding (both test runs and regular runs)
+  getBalancedSample: async (
+    extractorId: ObjectIdSchema,
+    model: EnforcedWithId<IXModelType>,
+    maxTotal: number
+  ): Promise<IXSuggestionType[]> => {
+    const baseQuery = {
+      extractorId,
+      $or: [{ date: null }, { date: { $lt: model.creationDate } }],
+      'state.error': { $ne: true },
+    };
+
+    // Get counts for balanced allocation
+    const [unlabeledCount, labeledCount] = await Promise.all([
+      IXSuggestionsModel.db.countDocuments({ ...baseQuery, 'state.labeled': { $ne: true } }),
+      IXSuggestionsModel.db.countDocuments({ ...baseQuery, 'state.labeled': true }),
+    ]);
+
+    // Calculate optimal allocation
+    const idealHalf = Math.floor(maxTotal / 2);
+    let unlabeledSampleSize = Math.min(idealHalf, unlabeledCount);
+    let labeledSampleSize = Math.min(idealHalf, labeledCount);
+
+    // Reallocate unused slots
+    const totalUsed = unlabeledSampleSize + labeledSampleSize;
+    const remainingSlots = maxTotal - totalUsed;
+
+    if (remainingSlots > 0) {
+      if (unlabeledCount > unlabeledSampleSize) {
+        unlabeledSampleSize = Math.min(unlabeledCount, unlabeledSampleSize + remainingSlots);
+      } else if (labeledCount > labeledSampleSize) {
+        labeledSampleSize = Math.min(labeledCount, labeledSampleSize + remainingSlots);
+      }
+    }
+
+    const pipeline = [
+      {
+        $facet: {
+          unlabeled: [
+            { $match: { ...baseQuery, 'state.labeled': { $ne: true } } },
+            { $sample: { size: unlabeledSampleSize } },
+          ],
+          labeled: [
+            { $match: { ...baseQuery, 'state.labeled': true } },
+            { $sample: { size: labeledSampleSize } },
+          ],
+        },
+      },
+      {
+        $project: {
+          suggestions: { $concatArrays: ['$unlabeled', '$labeled'] },
+        },
+      },
+      {
+        $unwind: '$suggestions',
+      },
+      {
+        $replaceRoot: { newRoot: '$suggestions' },
+      },
+    ];
+
+    return (await IXSuggestionsModel.db.aggregate(pipeline)) as IXSuggestionType[];
+  },
+
   aggregate: async (_extractorId: ObjectIdSchema): Promise<IXSuggestionAggregation> => {
     const extractorId = new ObjectId(_extractorId);
 
@@ -104,9 +169,22 @@ const Suggestions = {
           $match: { extractorId },
         },
         {
+          // processed = has a date AND not obsolete AND not error
+          $set: {
+            processed: {
+              $and: [
+                { $ne: ['$date', null] },
+                { $not: '$state.obsolete' },
+                { $not: '$state.error' },
+              ],
+            },
+          },
+        },
+        {
           $group: {
             _id: null,
             total: { $sum: 1 },
+            // All data
             labeled: { $sum: { $cond: ['$state.labeled', 1, 0] } },
             nonLabeled: {
               $sum: {
@@ -123,12 +201,46 @@ const Suggestions = {
                 ],
               },
             },
-            match: { $sum: { $cond: ['$state.match', 1, 0] } },
+            // Status
+            nonProcessed: {
+              $sum: {
+                $cond: [{ $eq: ['$date', null] }, 1, 0],
+              },
+            },
+            obsolete: {
+              $sum: {
+                $cond: [
+                  {
+                    $and: [{ $ne: ['$date', null] }, '$state.obsolete'],
+                  },
+                  1,
+                  0,
+                ],
+              },
+            },
+            error: {
+              $sum: {
+                $cond: [
+                  {
+                    $and: [{ $ne: ['$date', null] }, '$state.error'],
+                  },
+                  1,
+                  0,
+                ],
+              },
+            },
+            // Processed (exclude nonProcessed, obsolete, and error)
+            match: {
+              $sum: {
+                $cond: [{ $and: ['$processed', '$state.match'] }, 1, 0],
+              },
+            },
             mismatch: {
               $sum: {
                 $cond: [
                   {
                     $and: [
+                      '$processed',
                       { $ne: ['$state.match', undefined] },
                       { $ne: ['$state.match', null] },
                       { $not: '$state.match' },
@@ -139,10 +251,29 @@ const Suggestions = {
                 ],
               },
             },
-            obsolete: { $sum: { $cond: ['$state.obsolete', 1, 0] } },
-            error: { $sum: { $cond: ['$state.error', 1, 0] } },
+            noContext: {
+              $sum: {
+                $cond: [{ $and: ['$processed', { $not: '$state.hasContext' }] }, 1, 0],
+              },
+            },
+            // Support for accuracy calculation
+            processedLabeled: {
+              $sum: { $cond: [{ $and: ['$processed', '$state.labeled'] }, 1, 0] },
+            },
           },
         },
+        {
+          $set: {
+            accuracy: {
+              $cond: [
+                { $gt: ['$processedLabeled', 0] },
+                { $round: [{ $multiply: [{ $divide: ['$match', '$processedLabeled'] }, 100] }, 2] },
+                0,
+              ],
+            },
+          },
+        },
+        { $unset: 'processedLabeled' },
       ]);
 
     const { _id, ...results } = aggregations[0] || {
@@ -154,6 +285,9 @@ const Suggestions = {
       mismatch: 0,
       obsolete: 0,
       error: 0,
+      noContext: 0,
+      nonProcessed: 0,
+      accuracy: 0,
     };
 
     return results;
@@ -189,6 +323,28 @@ const Suggestions = {
         { $set: { trainingSample: true } }
       );
     }, Promise.resolve());
+  },
+
+  getAlreadySeenInFindRun: async (
+    extractorId: ObjectIdSchema,
+    candidateIds: string[],
+    runTimestamp: number
+  ): Promise<Set<string>> => {
+    const [queuedNow, readyThisRun] = await Promise.all([
+      IXSuggestionsModel.db.distinct('entityId', {
+        extractorId,
+        entityId: { $in: candidateIds },
+        status: 'processing',
+      }),
+      IXSuggestionsModel.db.distinct('entityId', {
+        extractorId,
+        entityId: { $in: candidateIds },
+        'modelData.findSuggestionsRunTimestamp': runTimestamp,
+        status: 'ready',
+      }),
+    ]);
+
+    return new Set<string>([...queuedNow, ...readyThisRun]);
   },
 
   save: async (suggestion: IXSuggestionType) => Suggestions.saveMultiple([suggestion]),

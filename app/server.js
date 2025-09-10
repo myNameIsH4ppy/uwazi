@@ -16,6 +16,8 @@ import { registerEventListeners } from 'api/eventListeners';
 import { applicationEventsBus } from 'api/eventsbus';
 import { appContextMiddleware } from 'api/utils/appContextMiddleware';
 import { requestIdMiddleware } from 'api/utils/requestIdMiddleware';
+import { Redis } from 'api/infrastructure/Redis';
+import { maskMongoPassword } from 'api/utils/maskMongoPassword';
 import uwaziMessage from '../message';
 import apiRoutes from './api/api';
 import privateInstanceMiddleware from './api/auth/privateInstanceMiddleware';
@@ -67,12 +69,16 @@ const gracefullShutdown = () => {
       process.exit(1);
     }
 
-    DB.disconnect().then(() => {
-      process.stdout.write('Disconnected from database\r\n');
-
-      process.stdout.write('Server closed succesfully\r\n');
-      process.exit(0);
-    });
+    Redis.disconnect()
+      .then(() => {
+        process.stdout.write('Disconnected from Redis\r\n');
+        return DB.disconnect();
+      })
+      .then(() => {
+        process.stdout.write('Disconnected from database\r\n');
+        process.stdout.write('Server closed succesfully\r\n');
+        process.exit(0);
+      });
   });
   closeSockets();
 };
@@ -105,8 +111,9 @@ app.use(appContextMiddleware);
 app.use(multitenantMiddleware);
 app.use(requestIdMiddleware);
 
-console.info('==> Connecting to', config.DBHOST);
+console.info('==> Connecting to', maskMongoPassword(config.DBHOST));
 DB.connect(config.DBHOST, config.DBAUTH).then(async () => {
+  await Redis.connect();
   await tenants.setupTenants();
   authRoutes(app);
   versionRoutes(app);

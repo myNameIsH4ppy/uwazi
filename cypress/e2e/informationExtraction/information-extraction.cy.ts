@@ -65,9 +65,9 @@ describe('Information Extraction', () => {
       cy.getByTestId('modal').within(() => {
         cy.get('input[id="extractor-name"]').type('Extractor 1', { delay: 0 });
 
-        editPropertyForExtractor('firstTemplate', 'Ordenes del presidente', 'Title');
+        editPropertyForExtractor('Ordenes del presidente', 'Title');
 
-        editPropertyForExtractor('secondTemplate', 'Causa', 'Title');
+        editPropertyForExtractor('Causa', 'Title');
 
         cy.contains('button', 'Next').click();
         cy.contains('Title');
@@ -83,7 +83,7 @@ describe('Information Extraction', () => {
       cy.contains('button', 'Create Extractor').click();
       cy.getByTestId('modal').within(() => {
         cy.get('input[id="extractor-name"]').type('Titles from all templates', { delay: 0 });
-        editPropertyForExtractor('ordenesDelPresidente', 'Ordenes del presidente', 'Title');
+        editPropertyForExtractor('Ordenes del presidente', 'Title');
         cy.contains('button', 'Select all').click();
         cy.contains('button', 'Next').click();
         checkTemplatesList([
@@ -109,9 +109,9 @@ describe('Information Extraction', () => {
       cy.contains('button', 'Create Extractor').click();
       cy.getByTestId('modal').within(() => {
         cy.contains('button', 'Select all').should('not.exist');
-        editPropertyForExtractor('ordenesDelPresidente', 'Ordenes del presidente', 'Title');
+        editPropertyForExtractor('Ordenes del presidente', 'Title');
         cy.contains('button', 'Select all').should('exist');
-        editPropertyForExtractor('ordenesDelPresidente', 'Ordenes del presidente', 'Title', false);
+        editPropertyForExtractor('Ordenes del presidente', 'Title', false);
         cy.contains('button', 'Select all').should('not.exist');
         cy.contains('button', 'Cancel').click();
       });
@@ -122,7 +122,7 @@ describe('Information Extraction', () => {
       cy.getByTestId('modal').within(() => {
         cy.get('input[id="extractor-name"]').type('Fechas from relevant templates', { delay: 0 });
 
-        editPropertyForExtractor('ordenesDeLaCorte', 'Ordenes de la corte', 'Fecha');
+        editPropertyForExtractor('Ordenes de la corte', 'Fecha');
         cy.contains('button', 'Select all').click();
         cy.contains('button', 'Next').click();
         checkTemplatesList([
@@ -145,10 +145,10 @@ describe('Information Extraction', () => {
         });
       cy.contains('button', 'Edit Extractor').click();
       cy.getByTestId('modal').within(() => {
-        cy.get('input[id="extractor-name"]').type(' edited', { delay: 0 });
         cy.get('label[for="filter_true"]').click();
-        editPropertyForExtractor('ordenesDeLaCorte', 'Ordenes de la corte', 'Title');
-        editPropertyForExtractor('causa', 'Causa', 'Title', false);
+        cy.get('input[id="extractor-name"]').type(' edited', { delay: 0 });
+        editPropertyForExtractor('Causa', 'Title', false);
+        editPropertyForExtractor('Ordenes de la corte', 'Title');
         cy.contains('button', 'Next').click();
         checkTemplatesList(['Ordenes de la corte', 'Ordenes del presidente']);
         cy.contains('button', 'Update').click();
@@ -211,7 +211,7 @@ describe('Information Extraction', () => {
       cy.contains('button', 'Create Extractor').click();
       cy.getByTestId('modal').within(() => {
         cy.get('input[id="extractor-name"]').type('Extractor 1', { delay: 0 });
-        editPropertyForExtractor('firstTemplate', 'Ordenes del presidente', 'Title');
+        editPropertyForExtractor('Ordenes del presidente', 'Title');
         cy.contains('button', 'Next').click();
         cy.contains('button', 'Create').click();
       });
@@ -264,11 +264,11 @@ describe('Information Extraction', () => {
       cy.checkA11y();
       cy.contains('button', 'Find suggestions').click();
       cy.wait('@trainSuggestions');
-      cy.contains('tr', 'Obsolete').contains('button', 'Accept').should('be.disabled');
+      cy.contains('tr', 'obsolete').contains('button', 'Accept').should('be.disabled');
       cy.contains('2023');
     });
 
-    it('should accept a single suggestion without affecting the order', () => {
+    it('should accept a single suggestion', () => {
       cy.contains('tr', 'Lorem Ipsum').contains('button', 'Accept').click();
 
       cy.contains('Suggestions sent');
@@ -276,9 +276,9 @@ describe('Information Extraction', () => {
       cy.contains('button', 'Dismiss').click();
 
       const titles = [
+        '2023 (en)',
         'Apitz Barbera y otros. Resolución de la Presidenta de 18 de diciembre de 2009 (en)',
         'Batman v Superman: Dawn of Justice (en)',
-        '2023 (en)',
         'Spider-Man: Shattered Dimensions (en)',
         'The Spectacular Spider-Man (en)',
         'Uwazi Heroes Investigation (other)',
@@ -288,18 +288,20 @@ describe('Information Extraction', () => {
         const text = element.get(0).innerText;
         expect(text).to.be.equal(`${titles[index]}`);
       });
+    });
 
+    it('should check for accessibility', () => {
+      cy.contains('a', 'Metadata Extraction').click();
+      cy.contains('tr', 'Extractor 1 edited').contains('a', 'Review').click();
       cy.checkA11y();
     });
 
-    it('should use filters', () => {
-      cy.intercept('GET', 'api/suggestions*').as('getSuggestions');
+    it('should use filters to get the only accepted suggestion', () => {
       cy.contains('button', 'Stats & Filters').click();
-      cy.checkA11y();
-      cy.contains('span', 'Match').click();
+      cy.contains('label', 'Match').click();
       cy.contains('button', 'Apply').click();
-      cy.wait('@getSuggestions');
       cy.get('tbody tr').should('have.length', 1);
+      cy.contains('tr', '2023 (en)');
     });
   });
 
@@ -329,19 +331,25 @@ describe('Information Extraction', () => {
       cy.contains('button', 'Cancel').click();
       cy.contains('button', 'Stats & Filters').click();
       cy.contains('button', 'Clear all').click();
+      cy.get('tbody tr').should('have.length', 5);
     });
 
     it('should click to fill with a new text', () => {
-      cy.contains('tr', 'The Spectacular Spider-Man').contains('button', 'Open').click();
+      cy.contains('a', 'Metadata Extraction').click();
+      cy.contains('tr', 'Extractor 1 edited').contains('a', 'Review').click();
+      cy.contains('tr', 'The Spectacular Spider-Man').within(() => {
+        cy.contains('button', 'Open').click();
+      });
       cy.get('aside').within(() => {
+        cy.contains('h1', 'The Spectacular Spider-Man');
         cy.get('input').clear();
       });
       cy.contains('button', 'Clear').click();
       cy.contains('span[role="presentation"]', 'The Spectacular Spider-Man')
         .eq(0)
         .setSelection('The Spectacular Spider-Man');
-
       cy.contains('button', 'Click to fill').click();
+      cy.get('div.highlight-rectangle').scrollIntoView();
       cy.get('div.highlight-rectangle').should('be.visible');
       cy.get('aside').within(() => {
         cy.get('input').should('have.value', 'The Spectacular Spider-Man');
@@ -356,33 +364,18 @@ describe('Information Extraction', () => {
       });
       cy.contains('Saved successfully');
       cy.contains('button', 'Dismiss').click();
-      cy.contains('A title');
-    });
-
-    it('should check that the table updated and the ordering is not affected', () => {
-      const titles = [
-        '2023 (en)',
-        'Apitz Barbera y otros. Resolución de la Presidenta de 18 de diciembre de 2009 (en)',
-        'Batman v Superman: Dawn of Justice (en)',
-        'Spider-Man: Shattered Dimensions (en)',
-        'A title (en)',
-        'Uwazi Heroes Investigation (other)',
-      ];
-
-      cy.get('tr > td:nth-child(2) > div').each((element, index) => {
-        const text = element.get(0).innerText;
-        expect(text).to.be.equal(`${titles[index]}`);
-      });
+      cy.get('aside').should('not.exist');
+      cy.contains('tr', '2023 (en)');
     });
 
     it('should open the pdf on the page of the selection', () => {
-      cy.contains('a', 'Metadata Extraction').eq(0).click();
-      cy.contains('Fechas from relevant templates').siblings().last().click();
-      cy.contains('Apitz Barbera y otros. Resolución de la Presidenta de 18 de diciembre de 2009')
-        .parent()
-        .parent()
-        .siblings()
-        .last()
+      cy.contains('a', 'Metadata Extraction').click();
+      cy.contains('tr', 'Fechas from relevant templates').contains('a', 'Review').click();
+      cy.contains(
+        'tr',
+        'Apitz Barbera y otros. Resolución de la Presidenta de 18 de diciembre de 2009'
+      )
+        .contains('button', 'Open')
         .click();
       cy.get('aside').within(() => {
         cy.get('input').should('have.value', '2018-12-01');

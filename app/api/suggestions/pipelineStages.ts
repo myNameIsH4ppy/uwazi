@@ -11,12 +11,38 @@ export const baseQueryFragment = (extractorId: ObjectId) => {
 };
 
 export const filterFragments = {
+  // All data
   labeled: { 'state.labeled': true },
   nonLabeled: { 'state.labeled': false },
-  match: { 'state.match': true },
-  mismatch: { 'state.match': false },
-  obsolete: { 'state.obsolete': true },
-  error: { 'state.error': true },
+  // Status
+  nonProcessed: { date: null },
+  obsolete: {
+    date: { $ne: null },
+    'state.obsolete': true,
+  },
+  error: {
+    date: { $ne: null },
+    'state.error': true,
+  },
+  // Processed (exclude nonProcessed, obsolete, and error)
+  match: {
+    date: { $ne: null },
+    'state.obsolete': { $ne: true },
+    'state.error': { $ne: true },
+    'state.match': true,
+  },
+  mismatch: {
+    date: { $ne: null },
+    'state.obsolete': { $ne: true },
+    'state.error': { $ne: true },
+    'state.match': false,
+  },
+  noContext: {
+    date: { $ne: null },
+    'state.obsolete': { $ne: true },
+    'state.error': { $ne: true },
+    'state.hasContext': false,
+  },
 };
 
 export const translateCustomFilter = (customFilter: SuggestionCustomFilter) => {
@@ -27,7 +53,8 @@ export const translateCustomFilter = (customFilter: SuggestionCustomFilter) => {
   if (customFilter.mismatch) orFilters.push(filterFragments.mismatch);
   if (customFilter.obsolete) orFilters.push(filterFragments.obsolete);
   if (customFilter.error) orFilters.push(filterFragments.error);
-
+  if (customFilter.noContext) orFilters.push(filterFragments.noContext);
+  if (customFilter.nonProcessed) orFilters.push(filterFragments.nonProcessed);
   return orFilters;
 };
 
@@ -37,6 +64,7 @@ export const getMatchStage = (
   countOnly = false
 ) => {
   const matchQuery: FilterQuery<IXSuggestionType> = baseQueryFragment(extractorId);
+
   if (customFilter) {
     const orFilters = translateCustomFilter(customFilter);
     if (orFilters.length > 0) matchQuery.$or = orFilters;
@@ -51,14 +79,9 @@ export const getMatchStage = (
     ...countExpression,
   ];
 
-  return matchStage as [
-    {
-      $match: FilterQuery<IXSuggestionType>;
-    },
-    {
-      $count: string;
-    },
-  ];
+  return { matchStage } as {
+    matchStage: [{ $match: FilterQuery<IXSuggestionType> }, { $count: string }];
+  };
 };
 
 export const getEntityStage = (languages: LanguagesListSchema) => {

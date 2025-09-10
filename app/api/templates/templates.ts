@@ -9,10 +9,9 @@ import { applicationEventsBus } from 'api/eventsbus';
 import translations from 'api/i18n/translations';
 import { WithId } from 'api/odm';
 import { search } from 'api/search';
-import { updateMapping } from 'api/search/entitiesIndex';
+import { reindexAll, updateMapping } from 'api/search/entitiesIndex';
 import settings from 'api/settings/settings';
 import { TemplateInputMappers } from 'api/templates.v2/services/TemplateInputMappers';
-import { tenants } from 'api/tenants';
 import dictionariesModel from 'api/thesauri/dictionariesModel';
 import createError from 'api/utils/Error';
 import { objectIndex } from 'shared/data_utils/objectIndex';
@@ -169,8 +168,14 @@ export default {
     template: TemplateSchema,
     language: string,
     reindex = true,
-    onTemplateProcessed: () => Promise<void> = async () => {}
+    fullReindex = false,
+    onTemplateProcessed: (
+      error?: Error,
+      denormalizationExecuted?: boolean
+    ) => Promise<void> = async () => {}
   ) {
+    // processing can not be saved from this interface, its an internal tracking property
+    delete template.processing;
     template.properties = template.properties || [];
     template.properties = await generateNames(template.properties);
     template.properties = await denormalizeInheritedProperties(template);
@@ -181,12 +186,12 @@ export default {
 
     await this.swapNamesValidation(mappedTemplate);
 
-    if (reindex) {
+    if (reindex && !fullReindex) {
       await updateMapping([mappedTemplate]);
     }
 
     return mappedTemplate._id
-      ? this._update(mappedTemplate, language, reindex, onTemplateProcessed)
+      ? this._update(mappedTemplate, language, reindex, fullReindex, onTemplateProcessed)
       : _save(mappedTemplate);
   },
 
@@ -247,6 +252,8 @@ export default {
 
     const relationshipPropsWithChangedRelData =
       currentTemplateV2.selectRelationshipPropsWithRelationshipChanges(newTemplate);
+
+    let denormalizationExecuted = false;
     const newRelationshipProps = currentTemplateV2
       .selectNewProperties(newTemplate)
       .filter(p => p.type === 'relationship');
@@ -259,24 +266,40 @@ export default {
         language,
         // @ts-ignore
         relationshipPropsWithChangedRelData.map(r => r.newProperty).concat(newRelationshipProps),
-        {
-          allTemplates: await this.get(),
-        },
-        50,
-        reindex
+        50
       );
+      denormalizationExecuted = true;
+    }
+
+    if (!denormalizationExecuted) {
+      await model.db.findOneAndUpdate({ _id: template._id }, { $unset: { processing: true } });
     }
 
     if (reindex) {
       await search.indexEntities({ template: template._id });
     }
+
+    return denormalizationExecuted;
+  },
+
+  async reindexAllTemplates(fullReindex: boolean) {
+    const allTemplates = await this.get();
+    if (fullReindex) {
+      return reindexAll(allTemplates, search);
+    }
+
+    return Promise.resolve();
   },
 
   async _update(
     template: TemplateSchema,
     language: string,
     _reindex = true,
-    onTemplateProcessed: () => Promise<void> = async () => {}
+    fullReindex = false,
+    onTemplateProcessed: (
+      error?: Error,
+      denormalizationExecuted?: boolean
+    ) => Promise<void> = async () => {}
   ) {
     const templateStructureChanges = await checkIfReindex(template);
     const reindex = _reindex && templateStructureChanges && !template.synced;
@@ -284,11 +307,7 @@ export default {
       await this.getById(ensure(template._id))
     );
 
-    if (
-      templateStructureChanges &&
-      tenants.current().featureFlags?.templatesDenormalizationPerfImprovements &&
-      currentTemplate.processing
-    ) {
+    if (templateStructureChanges && currentTemplate.processing?.active) {
       throw new ValidationError([
         { path: 'processing', message: 'template is being processed you can not update it yet' },
       ]);
@@ -303,36 +322,28 @@ export default {
     }
 
     await checkAndFillGeneratedIdProperties(currentTemplate, template);
-    if (
-      templateStructureChanges &&
-      tenants.current().featureFlags?.templatesDenormalizationPerfImprovements
-    ) {
+    if (templateStructureChanges) {
       // eslint-disable-next-line no-param-reassign
-      template.processing = true;
-    }
-    if (!tenants.current().featureFlags?.templatesDenormalizationPerfImprovements) {
-      // eslint-disable-next-line no-param-reassign
-      template.processing = undefined;
-      await model.db.findOneAndUpdate({ _id: template._id }, { $unset: { processing: true } });
+      template.processing = {
+        ...template.processing,
+        active: true,
+      };
     }
     const savedTemplate = await model.save(template, undefined);
 
-    if (
-      templateStructureChanges &&
-      !tenants.current().featureFlags?.templatesDenormalizationPerfImprovements
-    ) {
-      await this.postProcessTemplateUpdate(currentTemplate, savedTemplate, language, reindex);
-    }
-    if (
-      templateStructureChanges &&
-      tenants.current().featureFlags?.templatesDenormalizationPerfImprovements
-    ) {
-      this.postProcessTemplateUpdate(currentTemplate, savedTemplate, language, reindex)
-        .then(async () => onTemplateProcessed())
-        .then(async () => model.save({ _id: template._id, processing: false }))
-        .catch(e => {
-          throw e;
-        });
+    if (templateStructureChanges) {
+      // eslint-disable-next-line @typescript-eslint/no-floating-promises
+      this.reindexAllTemplates(fullReindex)
+        .then(async () =>
+          this.postProcessTemplateUpdate(currentTemplate, savedTemplate, language, reindex)
+        )
+        .then(async denormalizationExecuted => {
+          await onTemplateProcessed(
+            undefined,
+            !denormalizationExecuted && template.processing?.active
+          );
+        })
+        .catch(async error => onTemplateProcessed(error));
     }
 
     await applicationEventsBus.emit(

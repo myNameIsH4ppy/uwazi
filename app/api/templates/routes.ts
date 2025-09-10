@@ -1,17 +1,9 @@
+import settings from 'api/settings';
 import { Application, Request } from 'express';
 import { inspect } from 'util';
-import settings from 'api/settings';
-import { reindexAll } from 'api/search/entitiesIndex';
-import { search } from 'api/search';
-import { createError, validation } from '../utils';
 import needsAuthorization from '../auth/authMiddleware';
+import { createError, handleError, validation } from '../utils';
 import templates from './templates';
-import { tenants } from 'api/tenants';
-
-const reindexAllTemplates = async () => {
-  const allTemplates = await templates.get();
-  return reindexAll(allTemplates, search);
-};
 
 const handleMappingConflict = async <T>(callback: () => Promise<T>) => {
   try {
@@ -30,14 +22,22 @@ export default (app: Application) => {
       const { reindex: fullReindex, ...template } = req.body;
 
       const response = await handleMappingConflict(async () =>
-        templates.save(template, req.language, !fullReindex, async () => {
-          if (fullReindex) {
-            await reindexAllTemplates();
-            req.sockets.emitToCurrentTenant('templateProcessed', template._id.toString());
-          } else {
-            req.sockets.emitToCurrentTenant('templateProcessed', template._id.toString());
+        templates.save(
+          template,
+          req.language,
+          !fullReindex,
+          fullReindex,
+          async (error?: Error, fullyProcessed?: boolean) => {
+            if (error) {
+              handleError(error, { req });
+            }
+            if (fullyProcessed) {
+              req.sockets.emitToCurrentTenant('templateProcessed', {
+                templateId: template._id.toString(),
+              });
+            }
           }
-        })
+        )
       );
 
       req.sockets.emitToCurrentTenant('templateChange', response);
@@ -48,13 +48,6 @@ export default (app: Application) => {
       );
 
       if (updatedSettings) req.sockets.emitToCurrentTenant('updateSettings', updatedSettings);
-
-      if (
-        fullReindex &&
-        !tenants.current().featureFlags?.templatesDenormalizationPerfImprovements
-      ) {
-        await reindexAllTemplates();
-      }
 
       res.json(response);
     } catch (error) {

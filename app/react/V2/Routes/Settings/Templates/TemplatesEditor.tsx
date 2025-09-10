@@ -2,7 +2,7 @@
 /* eslint-disable max-statements */
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import { SettingsContent } from 'app/V2/Components/Layouts/SettingsContent';
-import { Table, ConfirmNavigationModal, ConfirmationModal } from 'V2/Components/UI';
+import { Table, ConfirmNavigationModal, ConfirmationModal, ProgressBar } from 'V2/Components/UI';
 import { Translate } from 'app/I18N/Translate';
 import { IncomingHttpHeaders } from 'http';
 import {
@@ -20,8 +20,6 @@ import { isEqual } from 'lodash';
 import { useSetAtom, useAtomValue } from 'jotai';
 import { notificationAtom, templatesAtom } from 'V2/atoms';
 import uniqueID from 'shared/uniqueID';
-import { ExclamationTriangleIcon } from '@heroicons/react/24/outline';
-import { Tooltip } from 'flowbite-react';
 import { socket } from 'app/socket';
 import {
   cleanProperty,
@@ -49,22 +47,29 @@ const templatesEditorLoader =
     let loadedTemplate = emptyTemplate;
     const templates = await templatesAPI.get(headers);
 
+    let entityCount = 0;
+
     if (params.templateId) {
       const templateToEdit = templates.find(template => template._id === params.templateId);
       if (templateToEdit) {
+        entityCount =
+          (await templatesAPI.checkTemplatesEntityCount(headers, [templateToEdit._id]))?.[
+            templateToEdit._id
+          ] || 0;
         loadedTemplate = templateToEdit as ClientTemplateSchema;
       }
     }
 
-    return { loadedTemplate, pagesOptions };
+    return { loadedTemplate, pagesOptions, entityCount };
   };
 
 const TemplatesEditor = () => {
   const navigate = useNavigate();
   const revalidator = useRevalidator();
-  const { loadedTemplate, pagesOptions } = useLoaderData() as {
+  const { loadedTemplate, pagesOptions, entityCount } = useLoaderData() as {
     loadedTemplate: ClientTemplateSchema;
     pagesOptions: { value: string; label: string }[];
+    entityCount: number;
   };
   const [template, setTemplate] = useState<ClientTemplateSchema>(loadedTemplate);
   const [properties, setProperties] = useState<PropertyRow[]>([]);
@@ -84,20 +89,64 @@ const TemplatesEditor = () => {
   const [isSaving, setIsSaving] = useState(false);
   const ENTITY_COUNT_THRESHOLD = 3000;
 
-  const handleTemplateProcessed = async () => {
-    await revalidator.revalidate();
+  const handleTemplateProcessed = useCallback(
+    async () => async (data: { templateId: string }) => {
+      if (data.templateId !== template?._id) {
+        return;
+      }
+
+      await revalidator.revalidate();
+      setNotifications({
+        type: 'success',
+        text: <Translate>Template processing completed.</Translate>,
+      });
+    },
+    [template]
+  );
+
+  const handleTemplateProcessing = useCallback(
+    async () =>
+      async (data: {
+        templateId: string;
+        processing: {
+          active: boolean;
+          completedJobs: number;
+          totalJobs: number;
+        };
+      }) => {
+        if (data.templateId !== template?._id) {
+          return;
+        }
+
+        setTemplate({ ...template, processing: data.processing });
+      },
+    [template]
+  );
+
+  const notifyTemplateProcessing = useCallback(() => {
     setNotifications({
-      type: 'success',
-      text: <Translate>Template processing completed.</Translate>,
+      type: 'warning',
+      text: <Translate>Template changes are being applied to all related entities.</Translate>,
+      ...(entityCount && {
+        details: (
+          <>
+            <Translate>Processing</Translate>
+            <span> {entityCount} </span>
+            <Translate>entities</Translate>
+          </>
+        ),
+      }),
     });
-  };
+  }, [entityCount]);
 
   useEffect(() => {
     socket.on('templateProcessed', handleTemplateProcessed);
+    socket.on('templateProcessing', handleTemplateProcessing);
     return () => {
       socket.off('templateProcessed', handleTemplateProcessed);
+      socket.off('templateProcessing', handleTemplateProcessing);
     };
-  });
+  }, [handleTemplateProcessed, handleTemplateProcessing]);
 
   useEffect(() => {
     setProperties(processProperties(loadedTemplate.properties || []));
@@ -109,11 +158,8 @@ const TemplatesEditor = () => {
 
   useEffect(() => {
     setTemplate(loadedTemplate);
-    if (loadedTemplate.processing) {
-      setNotifications({
-        type: 'warning',
-        text: <Translate>Template is being processed. Please wait for it to finish.</Translate>,
-      });
+    if (loadedTemplate.processing?.active) {
+      notifyTemplateProcessing();
     }
   }, [loadedTemplate]);
 
@@ -129,7 +175,12 @@ const TemplatesEditor = () => {
   }, [template, commonProperties, properties]);
 
   const checkPendingChanges = useCallback(
-    () => !isEqual(loadedTemplate, getCurrentStatus()),
+    //ignore processing
+    () =>
+      !isEqual(
+        { ...loadedTemplate, processing: undefined },
+        { ...getCurrentStatus(), processing: undefined }
+      ),
     [getCurrentStatus, loadedTemplate]
   );
 
@@ -149,14 +200,7 @@ const TemplatesEditor = () => {
     [commonProperties, properties]
   );
 
-  const handleTableChange = ({
-    selectedRows,
-    rows,
-  }: {
-    selectedRows: Record<string, boolean>;
-    rows: PropertyRow[];
-  }) => {
-    setSelected(rows.filter(row => selectedRows[row.rowId]).map(row => row.rowId));
+  const handleTableChange = (rows: PropertyRow[]) => {
     const newCommonProperties = rows.filter(row => row.isCommonProperty);
     const newProperties = rows.filter(row => !row.isCommonProperty);
     if (!isEqual(newCommonProperties, commonProperties)) {
@@ -175,13 +219,9 @@ const TemplatesEditor = () => {
     }
 
     const savedTemplate = await templatesAPI.save(templateToSave);
-    await revalidator.revalidate();
 
-    if (savedTemplate.processing) {
-      setNotifications({
-        type: 'warning',
-        text: <Translate>Template is being processed. Please wait for it to finish.</Translate>,
-      });
+    if (savedTemplate.processing?.active) {
+      notifyTemplateProcessing();
     } else {
       setNotifications({
         type: 'success',
@@ -189,7 +229,11 @@ const TemplatesEditor = () => {
       });
     }
 
-    await navigate(`/settings/templates/edit/${savedTemplate._id}`, { replace: true });
+    if (templateToSave._id) {
+      await revalidator.revalidate();
+    } else {
+      await navigate(`/settings/templates/edit/${savedTemplate._id}`, { replace: true });
+    }
   };
 
   const handlePropertySave = (propertyConfig: PropertySchema) => {
@@ -220,9 +264,6 @@ const TemplatesEditor = () => {
     }
 
     if (template._id) {
-      const entityCounts = await templatesAPI.checkTemplatesEntityCount(undefined, [template._id]);
-      const entityCount = entityCounts[template._id] || 0;
-
       if (entityCount > ENTITY_COUNT_THRESHOLD && !ignoreEntityCount) {
         setShowLargeEntityCountModal(true);
         return;
@@ -235,9 +276,9 @@ const TemplatesEditor = () => {
     } catch (e) {
       if (e.status === 409) {
         setShowReindexModal(true);
-        return;
+      } else {
+        setNotifications({ type: 'error', text: <Translate>Error saving template.</Translate> });
       }
-      setNotifications({ type: 'error', text: <Translate>Error saving template.</Translate> });
     } finally {
       setIsSaving(false);
     }
@@ -252,36 +293,50 @@ const TemplatesEditor = () => {
     setShowConfigPropertyPanel(true);
   };
 
-  const headerTitle = template.processing ? (
-    <Tooltip
-      content={<Translate>Template is being processed. Please wait for it to finish.</Translate>}
-      placement="right"
-      // eslint-disable-next-line react/style-prop-object
-      style="light"
-    >
-      <div className="flex items-center gap-2">
-        {template.name}
-        <ExclamationTriangleIcon className="w-5 h-5 text-warning-500" />
+  const progress = useMemo(
+    () => ({
+      percent:
+        ((template.processing?.completedJobs || 0) / (template.processing?.totalJobs || 1)) * 100,
+      total: template.processing?.totalJobs,
+    }),
+    [template.processing]
+  );
+
+  const progressBar = (
+    <div className="w-full flex flex-col gap-2">
+      <div className="flex justify-between mb-1">
+        <div className="font-medium text-gray-500 text-xs">
+          <Translate>Updating template properties across</Translate>
+          <span> {entityCount} </span>
+          <Translate>entities</Translate> ...
+        </div>
+        <span className="text-sm font-medium text-gray-500">{progress.percent.toFixed(2)}%</span>
       </div>
-    </Tooltip>
-  ) : (
-    template.name
+      <ProgressBar progress={progress.percent} color="gray" />
+    </div>
   );
 
   return (
     <div className="w-full h-full overflow-y-auto">
       <SettingsContent>
         <SettingsContent.Header
-          title={headerTitle}
+          title={template.name}
           path={new Map([['Templates', '/settings/templates']])}
-        />
+          className="flex items-center gap-2"
+        >
+          {template.processing?.active && progressBar}
+        </SettingsContent.Header>
         <SettingsContent.Body>
           <Table
             columns={propertyColumns(handleEditProperty)}
             data={allProperties}
             enableSelections
             dnd={{ enable: true }}
-            onChange={handleTableChange}
+            onSelect={({ rows, selectedRows }) => {
+              setSelected(rows.filter(row => selectedRows[row.rowId]).map(row => row.rowId));
+              handleTableChange(rows);
+            }}
+            onSort={({ rows }) => handleTableChange(rows)}
             header={
               <TemplateMetadata
                 value={{

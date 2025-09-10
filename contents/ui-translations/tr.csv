@@ -11,12 +11,15 @@ A target template needs to have the following properties,A target template needs
 A valid email is required,E-posta gerekli
 Accept,Kabul Et
 Accept suggestion,Accept suggestion
+Accept suggestions,Accept suggestions
 Accepted suggestion on entity,Accepted suggestion on entity
 Account,Hesap
 Account locked,Account locked
 Account locked. Check your email to unlock.,Account locked. Check your email to unlock.
 Account unlocked successfully,Account unlocked successfully
 Account updated,Account updated
+Accuracy,Accuracy
+Accuracy tooltip,Accuracy is defined by the amount of matches vs mismatches for labeled samples that have been processed.
 Action,Eylem
 Activate,Activate
 Activated,Activated
@@ -68,6 +71,7 @@ Admins,Admins
 ALL,ALL
 All,All
 "All changes will be lost, are you sure you want to proceed?","Tüm değişiklikler kaybolacak, devam etmek istediğinizden emin misiniz?"
+All data,Tüm veriler
 All editing options will be disabled.,All editing options will be disabled.
 All of the paragraphs will be deleted,All of the paragraphs will be deleted
 All of the previously created paragraphs will be deleted and recreated after the process.,All of the previously created paragraphs will be deleted and recreated after the process.
@@ -543,6 +547,7 @@ No valid target template available,No valid target template available
 No value,Değer yok
 No Value,Değer yok
 "No, cancel","No, cancel"
+Non processed,İşlenmemiş
 Non-labeled,Non-labeled
 Normal view,Normal görünüm
 Not already been use as source template in another extractor,Not already been use as source template in another extractor
@@ -551,6 +556,7 @@ Not Found,Not Found
 Nothing selected,Nothing selected
 Number of sentences above threshold,Eşiğin üzerindeki cümle sayısı
 Obsolete,Obsolete
+obsolete,obsolete
 OCR,OKT
 OCR button tip,This will process the document to recognize it's text. The original file will be added as a supporting file.
 OCR completed,OKT tamamlandı
@@ -788,6 +794,7 @@ Source template,Source template
 Source Template,Source Template
 Source's role in the relationship Source-Target.,Source's role in the relationship Source-Target.
 State,State
+Statistics,Statistics
 Stats & Filters,Stats & Filters
 Status,Status
 Storage,Storage
@@ -820,8 +827,8 @@ Target Template,Target Template
 Target template,Target template
 Target's role in the relationship Source-Target.,Target's role in the relationship Source-Target.
 Template,Şablon
+Template changes are being applied to all related entities.,Template changes are being applied to all related entities.
 Template conflict,Template conflict
-Template is being processed. Please wait for it to finish.,Template is being processed. Please wait for it to finish.
 Template name,Template name
 Template name already exists,Template name already exists
 Template processing completed.,Template processing completed.
@@ -930,6 +937,7 @@ Updated relationships,Updated relationships
 Updated settings,Updated settings
 Updated translations,Updated translations
 Updated user,Updated user
+Updating template properties across,Updating template properties across
 Upload a ZIP or CSV file.,Bir ZIP veya CSV dosyası yükleyin.
 Upload and select file,Dosya yükle ve seç
 Upload from computer,Bilgisayardan yükle

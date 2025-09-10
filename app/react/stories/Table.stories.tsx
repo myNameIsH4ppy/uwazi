@@ -12,7 +12,7 @@ type StoryProps = {
   dnd?: { enable?: boolean; disableEditingGroups?: boolean };
   enableSelections?: boolean;
   defaultSorting?: SortingState;
-  sortingFn?: () => void;
+  controlledSorting?: boolean;
   actionFn?: () => void;
 };
 
@@ -90,12 +90,12 @@ const StoryComponent = ({
   dnd,
   enableSelections,
   defaultSorting,
-  sortingFn,
   actionFn,
+  controlledSorting,
 }: StoryProps) => {
   const [dataState, setDataState] = useState(tableData);
   const [selected, setSelected] = useState({});
-  const [sorting, setSorting] = useState<SortingState>([]);
+  const [tableInternalSorting, setTableInternalSorting] = useState<SortingState>([]);
   const currentDataState = useRef(tableData);
   const currentSelections = useRef({});
   const [itemCounter, setItemCounter] = useState(1);
@@ -156,18 +156,25 @@ const StoryComponent = ({
           data={dataState}
           columns={columns}
           defaultSorting={defaultSorting}
-          onChange={({ rows, selectedRows, sortingState }) => {
+          onSelect={({ rows, selectedRows }) => {
             currentDataState.current = rows;
             currentSelections.current = selectedRows;
-            setSorting(sortingState);
           }}
-          sortingFn={sortingFn}
+          onSort={({ rows, sortingState }) => {
+            currentDataState.current = rows;
+            setTableInternalSorting(sortingState);
+          }}
+          manualSorting={controlledSorting}
           dnd={dnd}
           enableSelections={enableSelections}
           header={
             <div className="flex flex-col gap-1 items-start">
               <h2 className="text-lg">Table heading</h2>
-              <p>{sorting.length ? `Sorted by ${sorting[0].id}` : 'No sorting'}</p>
+              <p>
+                {tableInternalSorting.length
+                  ? `Sorted by ${tableInternalSorting[0].id}`
+                  : 'No sorting'}
+              </p>
             </div>
           }
           actions={actions}
@@ -214,6 +221,19 @@ const StoryComponent = ({
           )}
         </div>
       </div>
+      {controlledSorting && (
+        <>
+          <hr className="my-4" />
+          <div data-testid="controlled-sorting">
+            <h2>Sorting state controlled externally:</h2>
+            <p>
+              {tableInternalSorting.length
+                ? `Sorted by ${tableInternalSorting[0].id}`
+                : 'No sorting'}
+            </p>
+          </div>
+        </>
+      )}
     </div>
   );
 };
@@ -233,8 +253,8 @@ const Primary: Story = {
       dnd={{ enable: args.dnd?.enable, disableEditingGroups: args.dnd?.disableEditingGroups }}
       enableSelections={args.enableSelections}
       defaultSorting={args.defaultSorting}
-      sortingFn={args.sortingFn}
       actionFn={args.actionFn}
+      controlledSorting={args.controlledSorting}
     />
   ),
 };
@@ -249,6 +269,7 @@ const Basic = {
     columnType: 'basic',
     sortingFn: undefined,
     actionFn: undefined,
+    controlledSorting: false,
   },
 };
 

@@ -19,7 +19,9 @@ type Tenant = {
     sync?: boolean;
     deactivateTestJob?: boolean;
     paragraphExtraction?: boolean;
-    templatesDenormalizationPerfImprovements?: boolean;
+    deactivateUpdateLogs?: boolean;
+    deactivateS3Pooling?: boolean;
+    deactivateS3Logging?: boolean;
   };
   globalMatomo?: { id: string; url: string };
   ciMatomoActive?: boolean;

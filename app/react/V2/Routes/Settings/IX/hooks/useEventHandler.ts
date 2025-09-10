@@ -13,7 +13,7 @@ import type {
   AcceptSuggestionErrorCallback,
 } from '../events';
 import { ixStatus } from '../types';
-import { ixAcceptedSuggestions } from '../components/ixSuggestionsAtom';
+import { acceptedSuggestions } from '../components/atoms/acceptedSuggestions';
 
 type useEventHandlerProps = {
   extractorId: string;
@@ -22,7 +22,7 @@ type useEventHandlerProps = {
 
 const useEventHandler = ({ extractorId, updateStatus }: useEventHandlerProps) => {
   const setNotifications = useSetAtom(notificationAtom);
-  const setAcceptedSuggestionsAtom = useSetAtom(ixAcceptedSuggestions);
+  const setAcceptedSuggestionsAtom = useSetAtom(acceptedSuggestions);
   const { revalidate } = useRevalidator();
 
   useEffect(() => {
@@ -33,7 +33,11 @@ const useEventHandler = ({ extractorId, updateStatus }: useEventHandlerProps) =>
       data
     ) => {
       if (eventExtractorId === extractorId) {
-        updateStatus(modelStatus, data);
+        if (data?.processed === data?.total) {
+          updateStatus(ixStatus.ready);
+        } else {
+          updateStatus(modelStatus, data);
+        }
         await revalidate();
         setAcceptedSuggestionsAtom(new Set());
       }
@@ -56,7 +60,8 @@ const useEventHandler = ({ extractorId, updateStatus }: useEventHandlerProps) =>
       });
     };
 
-    const handleSuggestionError: AcceptSuggestionErrorCallback = message => {
+    const handleSuggestionError: AcceptSuggestionErrorCallback = async message => {
+      await revalidate();
       setNotifications({
         type: 'error',
         text: t('System', 'An error occurred', null, false),

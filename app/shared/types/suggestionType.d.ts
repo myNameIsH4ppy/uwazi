@@ -53,6 +53,8 @@ export interface IXSuggestionAggregation {
   mismatch: number;
   obsolete: number;
   error: number;
+  noContext: number;
+  nonProcessed: number;
 }
 
 export interface IXSuggestionType {
@@ -63,14 +65,15 @@ export interface IXSuggestionType {
   entityTemplate: string;
   fileId?: ObjectIdSchema;
   propertyName: string;
-  suggestedValue: PropertyValueSchema | PropertyValueSchema[];
+  suggestedValue: PropertyValueSchema | PropertyValueSchema[] | SuggestionOptionValue[];
   suggestedText?: string;
   segment?: string;
   language: string;
   page?: number;
   status?: 'processing' | 'failed' | 'ready';
   state?: IXSuggestionStateType;
-  date?: number;
+  date?: number | null;
+  modelData?: IXSuggestionsModelData;
   error?: string;
   selectionRectangles?: {
     top: number;
@@ -95,6 +98,10 @@ export interface IXSuggestionStateType {
   error: boolean;
 }
 
+export interface IXSuggestionsModelData {
+  findSuggestionsRunTimestamp?: number;
+}
+
 export interface IXSuggestionsQuery {
   filter: IXSuggestionsFilter;
   page?: {
@@ -115,6 +122,8 @@ export interface SuggestionCustomFilter {
   nonLabeled: boolean;
   obsolete: boolean;
   error: boolean;
+  noContext: boolean;
+  nonProcessed: boolean;
 }
 
 export interface IXSuggestionsFilter {
@@ -146,7 +155,14 @@ export interface ValuesSelectionSuggestion {
   values: {
     id: string;
     label: string;
+    segment_text?: string;
   }[];
   segment_text: string;
   [k: string]: unknown | undefined;
+}
+
+export interface SuggestionOptionValue {
+  id: string;
+  label?: string;
+  segment?: string;
 }

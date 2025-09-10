@@ -1,3 +1,4 @@
+/* eslint-disable global-require */
 /* eslint-disable max-statements */
 /* eslint-disable max-lines */
 // eslint-disable-next-line node/no-restricted-import
@@ -36,7 +37,7 @@ import { ExternalDummyService } from '../../tasksmanager/specs/ExternalDummyServ
 import { IXModelsModel } from '../IXModelsModel';
 import { Extractors } from '../ixextractors';
 import { IXWebSocketEvents } from '../WebSocketEvents';
-import { FileWithAggregation, NoLabeledEntities, NoSegmentedFiles } from '../ixMaterials';
+import { FileWithAggregation, NoFilesForTraining, NoLabeledEntities } from '../ixMaterials';
 import { TEST_RUN_SUGGESTIONS_SIZE } from '../ixmodels';
 
 let informationExtractionForJob: InformationExtraction;
@@ -107,7 +108,7 @@ const _saveSuggestionProcess = async (file: FileWithAggregation, extractor: IXEx
     extractorId: extractor._id,
     propertyName: extractor.property,
     status: 'processing',
-    date: new Date().getTime(),
+    date: null,
   };
 
   return Suggestions.save(suggestion);
@@ -179,6 +180,7 @@ describe('InformationExtraction', () => {
     });
     IXExternalService.reset();
     jest.resetAllMocks();
+    // eslint-disable-next-line no-empty-function
     jest.spyOn(setupSockets, 'emitToTenant').mockImplementation(() => {});
   });
 
@@ -196,6 +198,7 @@ describe('InformationExtraction', () => {
     language: string,
     extractorName: string,
     propertyType?: PropertyTypeSchema
+    // eslint-disable-next-line max-params
   ) => {
     const extractorId = factory.id(extractorName);
     const [extractor] = await Extractors.get({ _id: extractorId });
@@ -242,19 +245,15 @@ describe('InformationExtraction', () => {
 
       const xmlC = await readDocument('C');
 
-      const xmlD = await readDocument('D');
-
-      const xmlE = await readDocument('E');
-
       expect(IXExternalService.materialsFileParams).toEqual({
         0: `/xml_to_train/tenant1/${factory.id('prop1extractor')}`,
         id: factory.id('prop1extractor').toString(),
         tenant: 'tenant1',
       });
 
-      expect(IXExternalService.files).toEqual(expect.arrayContaining([xmlA, xmlC, xmlD, xmlE]));
+      expect(IXExternalService.files).toEqual(expect.arrayContaining([xmlA, xmlC]));
       expect(IXExternalService.filesNames.sort()).toEqual(
-        ['documentA.xml', 'documentC.xml', 'documentD.xml', 'documentE.xml'].sort()
+        ['documentA.xml', 'documentC.xml'].sort()
       );
     });
 
@@ -299,7 +298,7 @@ describe('InformationExtraction', () => {
     it('should send labeled data', async () => {
       await informationExtraction.trainModel(factory.id('prop1extractor'));
 
-      expect(IXExternalService.materials.length).toBe(4);
+      expect(IXExternalService.materials.length).toBe(2);
       expect(IXExternalService.materials.find(m => m.xml_file_name === 'documentA.xml')).toEqual({
         xml_file_name: 'documentA.xml',
         id: factory.id('prop1extractor').toString(),
@@ -317,7 +316,7 @@ describe('InformationExtraction', () => {
         page_width: 595,
         page_height: 841,
         language_iso: 'en',
-        label_text: 'labeled text',
+        label_text: '1088985600',
         label_segments_boxes: [{ top: 0, left: 0, width: 0, height: 0, page_number: '1' }],
       });
     });
@@ -432,22 +431,13 @@ describe('InformationExtraction', () => {
     it('should sanitize dates before sending', async () => {
       await informationExtraction.trainModel(factory.id('prop2extractor'));
 
-      expect(IXExternalService.materials.find(m => m.xml_file_name === 'documentA.xml')).toEqual({
-        xml_file_name: 'documentA.xml',
+      expect(IXExternalService.materials.find(m => m.xml_file_name === 'documentD.xml')).toEqual({
+        xml_file_name: 'documentD.xml',
         id: factory.id('prop2extractor').toString(),
         tenant: 'tenant1',
-        xml_segments_boxes: [
-          {
-            left: 58,
-            top: 63,
-            width: 457,
-            height: 15,
-            page_number: 1,
-            text: 'something',
-          },
-        ],
-        page_width: 595,
-        page_height: 841,
+        xml_segments_boxes: [],
+        page_height: 1,
+        page_width: 2,
         language_iso: 'en',
         label_text: '2011-03-04',
         label_segments_boxes: [{ top: 0, left: 0, width: 0, height: 0, page_number: '1' }],
@@ -488,6 +478,7 @@ describe('InformationExtraction', () => {
         label_text: 'any_rich_text_value_english',
         label_segments_boxes: [{ top: 0, left: 0, width: 0, height: 0, page_number: '1' }],
       });
+
       expect(suggestion2).toEqual({
         id: extractorId.toString(),
         xml_file_name: xml2,
@@ -683,7 +674,7 @@ describe('InformationExtraction', () => {
       const promise1 = informationExtraction.trainModel(factory.id('prop3extractor'));
       await expect(promise1).rejects.toThrow();
       expect(setupSockets.emitToTenant).toHaveBeenNthCalledWith(
-        1,
+        2,
         'tenant1',
         IXWebSocketEvents.ErrorTrainingModel,
         { message: NoLabeledEntities.defaultMessage }
@@ -696,7 +687,7 @@ describe('InformationExtraction', () => {
       );
       await expect(promise2).rejects.toThrow();
       expect(setupSockets.emitToTenant).toHaveBeenNthCalledWith(
-        2,
+        4,
         'tenant1',
         IXWebSocketEvents.ErrorTrainingModel,
         { message: NoLabeledEntities.defaultMessage }
@@ -711,7 +702,7 @@ describe('InformationExtraction', () => {
       );
       await expect(promise3).rejects.toThrow();
       expect(setupSockets.emitToTenant).toHaveBeenNthCalledWith(
-        3,
+        6,
         'tenant1',
         IXWebSocketEvents.ErrorTrainingModel,
         { message: NoLabeledEntities.defaultMessage }
@@ -733,7 +724,7 @@ describe('InformationExtraction', () => {
       expect(setupSockets.emitToTenant).toHaveBeenCalledWith(
         'tenant1',
         IXWebSocketEvents.ErrorTrainingModel,
-        { message: NoSegmentedFiles.defaultMessage }
+        { message: NoFilesForTraining.defaultMessage }
       );
     });
 
@@ -751,7 +742,7 @@ describe('InformationExtraction', () => {
       expect(setupSockets.emitToTenant).toHaveBeenCalledWith(
         'tenant1',
         IXWebSocketEvents.ErrorTrainingModel,
-        { message: NoSegmentedFiles.defaultMessage }
+        { message: NoFilesForTraining.defaultMessage }
       );
     });
   });
@@ -764,19 +755,14 @@ describe('InformationExtraction', () => {
 
       const xmlC = await readDocument('C');
 
-      const xmlD = await readDocument('D');
-
-      const xmlE = await readDocument('E');
-
       expect(IXExternalService.materialsFileParams).toEqual({
         0: `/xml_to_train/tenant1/${factory.id('prop1extractor')}`,
         id: factory.id('prop1extractor').toString(),
         tenant: 'tenant1',
       });
-
-      expect(IXExternalService.files).toEqual(expect.arrayContaining([xmlA, xmlC, xmlD, xmlE]));
+      expect(IXExternalService.files).toEqual(expect.arrayContaining([xmlA, xmlC]));
       expect(IXExternalService.filesNames.sort()).toEqual(
-        ['documentA.xml', 'documentC.xml', 'documentD.xml', 'documentE.xml'].sort()
+        ['documentA.xml', 'documentC.xml'].sort()
       );
     });
 
@@ -1040,6 +1026,8 @@ describe('InformationExtraction', () => {
     });
 
     it('should filter out files with failed segmentations to prevent zero-length batches', async () => {
+      await SegmentationModel.delete({ fileID: factory.id('F1') });
+
       // Segmentation with failed status for documentA
       await SegmentationModel.save({
         fileID: factory.id('F1'),
@@ -1054,14 +1042,7 @@ describe('InformationExtraction', () => {
         status: 'ready',
         segmentation: {
           paragraphs: [
-            {
-              left: 58,
-              top: 63,
-              width: 457,
-              height: 15,
-              page_number: 1,
-              text: 'something',
-            },
+            { left: 58, top: 63, width: 457, height: 15, page_number: 1, text: 'something' },
           ],
           page_width: 595,
           page_height: 841,
@@ -1106,7 +1087,7 @@ describe('InformationExtraction', () => {
         language: 'en',
         propertyName: 'property1',
         extractorId: factory.id('prop1extractor'),
-        date: 100,
+        date: null,
         state: {
           labeled: false,
           withValue: false,
@@ -1125,7 +1106,7 @@ describe('InformationExtraction', () => {
         language: 'en',
         propertyName: 'property1',
         extractorId: factory.id('prop1extractor'),
-        date: 100,
+        date: null,
         state: {
           labeled: false,
           withValue: false,
@@ -1172,6 +1153,8 @@ describe('InformationExtraction', () => {
     });
 
     it('should filter out files with processing segmentations to prevent zero-length batches', async () => {
+      await SegmentationModel.delete({ fileID: factory.id('F1') });
+
       // Segmentation with processing status for documentA
       await SegmentationModel.save({
         fileID: factory.id('F1'),
@@ -1186,14 +1169,7 @@ describe('InformationExtraction', () => {
         status: 'ready',
         segmentation: {
           paragraphs: [
-            {
-              left: 58,
-              top: 63,
-              width: 457,
-              height: 15,
-              page_number: 1,
-              text: 'something',
-            },
+            { left: 58, top: 63, width: 457, height: 15, page_number: 1, text: 'something' },
           ],
           page_width: 595,
           page_height: 841,
@@ -1211,6 +1187,8 @@ describe('InformationExtraction', () => {
     });
 
     it('should filter out files with missing segmentation status', async () => {
+      await SegmentationModel.delete({ fileID: factory.id('F1') });
+
       await SegmentationModel.save({
         fileID: factory.id('F1'),
         filename: 'documentA.pdf',
@@ -1335,7 +1313,93 @@ describe('InformationExtraction', () => {
       );
     });
 
+    it('should avoid non-ready segmentations when duplicates exist for the same file', async () => {
+      await SegmentationModel.delete({});
+      await IXSuggestionsModel.delete({});
+      await filesModel.delete({});
+
+      await filesModel.save({
+        _id: factory.id('F1'),
+        filename: 'document1.pdf',
+        type: 'document',
+        language: 'en',
+        entity: 'entity1',
+        extractedMetadata: [],
+      });
+
+      await filesModel.save({
+        _id: factory.id('F2'),
+        filename: 'document2.pdf',
+        type: 'document',
+        language: 'en',
+        entity: 'entity2',
+        extractedMetadata: [],
+      });
+
+      // F1: only non-ready segmentation
+      await SegmentationModel.save({
+        fileID: factory.id('F1'),
+        filename: 'document1.pdf',
+        status: 'processing',
+      });
+
+      // F2: ready segmentation + a later non-ready duplicate
+      await SegmentationModel.save({
+        fileID: factory.id('F2'),
+        filename: 'document2.pdf',
+        status: 'ready',
+        segmentation: {
+          paragraphs: [
+            { left: 58, top: 63, width: 457, height: 15, page_number: 1, text: 'content' },
+          ],
+          page_width: 595,
+          page_height: 841,
+        },
+        xmlname: 'document2.xml',
+      });
+
+      await SegmentationModel.save({
+        fileID: factory.id('F2'),
+        filename: 'document2.pdf',
+        status: 'processing',
+        xmlname: 'document2-later.xml',
+      });
+
+      // Suggestion placeholders for both files
+      await IXSuggestionsModel.save({
+        _id: factory.id('S1'),
+        extractorId: factory.id('prop1extractor'),
+        entityId: 'entity1',
+        fileId: factory.id('F1'),
+        language: 'en',
+        propertyName: 'property1',
+        date: null,
+        state: { error: false } as any,
+      });
+
+      await IXSuggestionsModel.save({
+        _id: factory.id('S2'),
+        extractorId: factory.id('prop1extractor'),
+        entityId: 'entity2',
+        fileId: factory.id('F2'),
+        language: 'en',
+        propertyName: 'property1',
+        date: null,
+        state: { error: false } as any,
+      });
+
+      const { getFilesForSuggestions } = await import('../ixMaterials');
+      const files = await getFilesForSuggestions(factory.id('prop1extractor'), 10);
+
+      // Only F2 should be returned, and it must attach the ready segmentation
+      expect(files.map(f => f._id.toString()).sort()).toEqual([factory.id('F2').toString()].sort());
+      expect(files[0].segmentation?.status).toBe('ready');
+      expect(files[0].segmentation?.xmlname).toBe('document2.xml');
+    });
+
     it('should handle mixed segmentation statuses correctly', async () => {
+      await SegmentationModel.delete({ fileID: factory.id('F3') });
+
       // Segmentations with different statuses
       await SegmentationModel.save({
         fileID: factory.id('F1'),
@@ -1428,7 +1492,7 @@ describe('InformationExtraction', () => {
         extractorId: factory.id('prop1extractor'),
         entityId: 'entity1',
         fileId: factory.id('F1'),
-        date: 100,
+        date: null,
         state: {
           labeled: false,
           withValue: false,
@@ -1446,7 +1510,7 @@ describe('InformationExtraction', () => {
         extractorId: factory.id('prop1extractor'),
         entityId: 'entity2',
         fileId: factory.id('F2'),
-        date: 100,
+        date: null,
         state: {
           labeled: false,
           withValue: false,
@@ -1468,6 +1532,8 @@ describe('InformationExtraction', () => {
     });
 
     it('should create suggestions for all files regardless of segmentation status', async () => {
+      await SegmentationModel.delete({ fileID: factory.id('F3') });
+
       // Segmentations with different statuses
       await SegmentationModel.save({
         fileID: factory.id('F1'),
@@ -1574,7 +1640,7 @@ describe('InformationExtraction', () => {
         );
       });
 
-      it('should only process a subset of suggestions, excluding the ones that are training samples', async () => {
+      it('should only process a subset of suggestions', async () => {
         await informationExtraction.getSuggestions(factory.id('sourceTextExtractor1'));
         await informationExtraction.getSuggestions(factory.id('sourceTextExtractor1'));
         const [model] = await IXModelsModel.get({
@@ -1586,8 +1652,8 @@ describe('InformationExtraction', () => {
           extractorId: factory.id('sourceTextExtractor1'),
           status: 'processing',
         });
-        expect(suggestionsInProcessing.length).toBe(1);
-        expect(suggestionsInProcessing[0].entityId).toBe('entity_without_label_data');
+        expect(suggestionsInProcessing.length).toBe(3);
+        expect(suggestionsInProcessing.map(s => s.entityId)).toContain('entity_without_label_data');
         expect(setupSockets.emitToTenant).toHaveBeenNthCalledWith(
           1,
           'tenant1',
@@ -1616,7 +1682,8 @@ describe('InformationExtraction', () => {
       await IXModelsModel.save(model);
 
       const message: IXResultsMessage = {
-        task: 'create_model',
+        // @ts-expect-error - this is a test for a cancel that happens outside of the flow, so we don't care about the task
+        task: 'any_task',
         data_url: 'some/url',
         error_message: '',
         params: {
@@ -1840,11 +1907,14 @@ describe('InformationExtraction', () => {
           status: 'failed',
           error: 'Issue calculation suggestion',
           state: {
+            labeled: false,
+            withValue: false,
             match: null,
             withSuggestion: false,
             hasContext: false,
             processing: false,
             error: true,
+            obsolete: false,
           },
         })
       );
@@ -2088,27 +2158,35 @@ describe('InformationExtraction', () => {
             ...expectedBase,
             fileId: factory.id('F17'),
             entityId: 'A17',
-            suggestedValue: ['A'],
+            suggestedValue: [{ id: 'A', label: 'A' }],
             segment: 'it is A',
           },
           {
             ...expectedBase,
             fileId: factory.id('F18'),
             entityId: 'A18',
-            suggestedValue: ['B', 'C'],
+            suggestedValue: [
+              { id: 'B', label: 'B' },
+              { id: 'C', label: 'C' },
+            ],
             segment: 'it is B or C',
           },
           {
             ...expectedBase,
             fileId: factory.id('F19'),
             entityId: 'A19',
-            suggestedValue: ['A', 'C'],
+            suggestedValue: [
+              { id: 'A', label: 'A' },
+              { id: 'C', label: 'C' },
+            ],
             segment: 'it is A or C',
             state: {
               ...expectedBase.state,
               withValue: false,
               labeled: false,
               match: false,
+              withSuggestion: true,
+              hasContext: true,
             },
           },
         ]);
@@ -2190,14 +2268,17 @@ describe('InformationExtraction', () => {
             ...expectedBase,
             fileId: factory.id('F21'),
             entityId: 'A21',
-            suggestedValue: ['P1sharedId'],
+            suggestedValue: [{ id: 'P1sharedId', label: 'P1' }],
             segment: 'it is P1',
           },
           {
             ...expectedBase,
             fileId: factory.id('F22'),
             entityId: 'A22',
-            suggestedValue: ['P1sharedId', 'P2sharedId'],
+            suggestedValue: [
+              { id: 'P1sharedId', label: 'P1' },
+              { id: 'P2sharedId', label: 'P2' },
+            ],
             segment: 'it is P1 or P2',
             state: {
               ...expectedBase.state,
@@ -2208,13 +2289,15 @@ describe('InformationExtraction', () => {
             ...expectedBase,
             fileId: factory.id('F23'),
             entityId: 'A23',
-            suggestedValue: ['P3sharedId'],
+            suggestedValue: [{ id: 'P3sharedId', label: 'P3' }],
             segment: 'it is P3',
             state: {
               ...expectedBase.state,
               withValue: false,
               labeled: false,
               match: false,
+              withSuggestion: true,
+              hasContext: true,
             },
           },
         ]);

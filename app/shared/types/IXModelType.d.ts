@@ -9,6 +9,9 @@ export interface IXModelType {
   creationDate: number;
   status?: 'processing' | 'failed' | 'ready';
   findingSuggestions?: boolean;
+  findSuggestionsRunTimestamp?: number;
+  findSuggestionsSharedIds?: string[];
+  findSuggestionsInitialSharedIdsCount?: number;
   testRun?: boolean;
   testRunSuggestionsToFind?: number;
   totalSuggestionsToFind?: number;

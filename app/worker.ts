@@ -1,6 +1,7 @@
 /* eslint-disable max-statements */
 import { config } from 'api/config';
 import { ATServiceListener } from 'api/externalIntegrations.v2/automaticTranslation/adapters/driving/ATServiceListener';
+import { Redis } from 'api/infrastructure/Redis';
 import { SystemLogger } from 'api/log.v2/infrastructure/StandardLogger';
 import { DB } from 'api/odm';
 import { PXParagraphsResultListener } from 'api/paragraphExtraction/infrastructure/PXParagraphsResultListener';
@@ -34,12 +35,12 @@ DB.connect(config.DBHOST, config.DBAUTH)
   .then(async () => {
     await tenants.setupTenants();
     permissionsContext.setCommandContextAsDefault();
-    setupWorkerSockets();
+    setupWorkerSockets(await Redis.connect());
 
     systemLogger.info('[Worker] - ==> 📡 starting external services...');
 
     const services: Record<string, any> = {
-      ocr_manager: ocrManager,
+      ocr_manager: ocrManager(),
       at_service: new ATServiceListener(),
       px_paragraphs_results: new PXParagraphsResultListener(DefaultDispatcher),
       information_extractor: new InformationExtraction(),
@@ -56,12 +57,12 @@ DB.connect(config.DBHOST, config.DBAUTH)
       toc_service: new DistributedLoop('toc_service', async () => tocService.processAllTenants(), {
         port: config.redis.port,
         host: config.redis.host,
-        delayTimeBetweenTasks: 30000,
+        delayTimeBetweenTasks: 60000,
       }),
       sync_job: new DistributedLoop('sync_job', async () => syncWorker.runAllTenants(), {
         port: config.redis.port,
         host: config.redis.host,
-        delayTimeBetweenTasks: 1000,
+        delayTimeBetweenTasks: 10000,
       }),
 
       pdf_segmentation: new PDFSegmentation(),
@@ -71,7 +72,7 @@ DB.connect(config.DBHOST, config.DBAUTH)
     services.segmentation_distributed_loop = new DistributedLoop(
       'segmentation_repeat',
       services.pdf_segmentation.segmentPdfs,
-      { port: config.redis.port, host: config.redis.host, delayTimeBetweenTasks: 5000 }
+      { port: config.redis.port, host: config.redis.host, delayTimeBetweenTasks: 60000 }
     );
 
     services.twitter_distributed_loop = new DistributedLoop(
@@ -108,6 +109,8 @@ DB.connect(config.DBHOST, config.DBAUTH)
           `[Worker Graceful shutdown] - These services [${notStoppedServices}] did not stop in time, initiating forceful shutdown...`
         );
       }
+      await DB.disconnect();
+      await Redis.disconnect();
 
       process.exit(0);
     });

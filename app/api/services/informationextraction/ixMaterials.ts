@@ -5,6 +5,7 @@
 import moment from 'moment';
 import {
   ExtractedMetadataSchema,
+  LanguageISO6391,
   ObjectIdSchema,
   PropertyTypeSchema,
 } from 'shared/types/commonTypes';
@@ -15,16 +16,19 @@ import { SegmentationModel } from 'api/services/pdfsegmentation/segmentationMode
 import { IXSuggestionsModel } from 'api/suggestions/IXSuggestionsModel';
 import ixmodels from 'api/services/informationextraction/ixmodels';
 import { FileType } from 'shared/types/fileType';
-import { objectIndex } from 'shared/data_utils/objectIndex';
-import settings from 'api/settings/settings';
 import templatesModel from 'api/templates/templates';
-import { UwaziFilterQuery } from 'api/odm';
-import { Entity } from 'api/entities.v2/model/Entity';
 import { propertyTypes } from 'shared/propertyTypes';
 import { ensure } from 'shared/tsUtils';
-import { LanguageUtils } from 'shared/language';
+import { EnforcedWithId, UwaziFilterQuery } from 'api/odm';
+import { Entity } from 'api/entities.v2/model/Entity';
+import { IXModelType } from 'shared/types/IXModelType';
 import { IXSuggestionType } from 'shared/types/suggestionType';
+import { PipelineBuilder } from 'api/suggestions/queryBuilder';
+import { IXExtractorType } from 'shared/types/extractorType';
+import { ObjectId } from 'mongodb';
+import { Suggestions } from 'api/suggestions/suggestions';
 import { Extractors } from './ixextractors';
+import { IXServices } from './IXServices';
 
 const BATCH_SIZE_FOR_PDF = 50;
 const BATCH_SIZE_FOR_PROPERTY = 1000;
@@ -97,7 +101,7 @@ async function getFilesWithAggregations(files: (FileType & FileEnforcedNotUndefi
   const filesNames = files.filter(x => x.filename).map(x => x.filename);
 
   const segmentationForFiles = (await SegmentationModel.get(
-    { filename: { $in: filesNames } },
+    { filename: { $in: filesNames }, status: 'ready' },
     'filename segmentation xmlname status'
   )) as (SegmentationType & { filename: string })[];
 
@@ -139,28 +143,6 @@ async function getPropertyType(templates: ObjectIdSchema[], property: string) {
   return type;
 }
 
-async function anyFilesSegmented(entitiesFromTrainingTemplatesIds: string[]) {
-  const segmentedFilesCount = await filesModel.count({
-    type: 'document',
-    filename: { $exists: true },
-    language: { $exists: true },
-    _id: { $in: await getSegmentedFilesIds() },
-    entity: { $in: entitiesFromTrainingTemplatesIds },
-  });
-  return !!segmentedFilesCount;
-}
-
-async function fileQuery(entitiesFromTrainingTemplatesIds: string[]) {
-  const query = {
-    type: 'document',
-    filename: { $exists: true },
-    language: { $exists: true },
-    _id: { $in: await getSegmentedFilesIds() },
-    entity: { $in: entitiesFromTrainingTemplatesIds },
-  };
-  return query;
-}
-
 function entityForTrainingQuery(
   templates: ObjectIdSchema[],
   toProperty: string,
@@ -169,7 +151,12 @@ function entityForTrainingQuery(
   const query: UwaziFilterQuery<any> = { template: { $in: templates } };
 
   if (fromProperty) {
-    query[`metadata.${fromProperty}`] = { $exists: true, $ne: [] };
+    // This new logic is not tested
+    if (fromProperty === 'title') {
+      query.title = { $ne: '' };
+    } else {
+      query[`metadata.${fromProperty}`] = { $exists: true, $ne: [] };
+    }
   }
 
   if (toProperty === 'title') {
@@ -205,108 +192,207 @@ async function getEntitiesForTraining(
   return entities;
 }
 
-async function getEntitiesForSuggestions(extractorId: ObjectIdSchema, limit?: number) {
-  const [currentModel] = await ixmodels.get({ extractorId });
-  const [extractor] = await Extractors.get({ _id: extractorId });
+async function getEntitiesForIdsQuery(model: EnforcedWithId<IXModelType>, BATCH_SIZE: number) {
+  if (!model.findSuggestionsSharedIds?.length) {
+    await ixmodels.unsetFindSuggestionsData(model._id);
+    return null;
+  }
 
-  const query: UwaziFilterQuery<any> = {
-    extractorId,
-    date: { $lt: currentModel.creationDate },
-    'state.error': { $ne: true },
+  const sharedIdsToProcess = model.findSuggestionsSharedIds!.slice(0, BATCH_SIZE);
+
+  await ixmodels.updateMany(
+    { _id: model._id },
+    { $set: { findSuggestionsSharedIds: model.findSuggestionsSharedIds!.slice(BATCH_SIZE) } }
+  );
+
+  const entityQuery = { sharedId: { $in: sharedIdsToProcess } };
+
+  return entityQuery;
+}
+
+async function getEntitiesForSuggestionsQuery(
+  extractorId: ObjectIdSchema,
+  model: EnforcedWithId<IXModelType>,
+  BATCH_SIZE: number
+) {
+  // Use balanced sampling for all suggestion finding (both test runs and regular runs)
+  const suggestions = await Suggestions.getBalancedSample(extractorId, model, BATCH_SIZE);
+
+  if (!suggestions.length) {
+    return null;
+  }
+
+  const entityQuery = {
+    sharedId: { $in: [...new Set(suggestions.map(s => s.entityId))] },
+    language: { $in: [...new Set(suggestions.map(s => s.language))] },
   };
 
-  if (currentModel.testRun) {
-    query.trainingSample = { $ne: true };
-  }
+  return entityQuery;
+}
 
-  const suggestions = await IXSuggestionsModel.get(query, '', {
-    limit: limit || BATCH_SIZE_FOR_PROPERTY,
-  });
+async function getEntitiesForSuggestions(extractorId: ObjectIdSchema, limit?: number) {
+  const [[model], [extractor]] = await Promise.all([
+    ixmodels.get({ extractorId }),
+    Extractors.get({ _id: extractorId }),
+  ]);
 
-  if (!extractor.property || !extractor) {
+  if (!extractor?.property) {
     return [];
   }
 
-  const propertyType = await getPropertyType(extractor.templates, extractor.property);
+  // Validate that the property exists in the template (throws if not found)
+  await getPropertyType(extractor.templates, extractor.property);
 
-  if (!propertyType) {
+  const BATCH_SIZE = limit || BATCH_SIZE_FOR_PROPERTY;
+
+  let entityQuery: UwaziFilterQuery<any> | null = {};
+
+  if (model.findSuggestionsRunTimestamp) {
+    entityQuery = await getEntitiesForIdsQuery(model, BATCH_SIZE);
+  } else {
+    entityQuery = await getEntitiesForSuggestionsQuery(extractorId, model, BATCH_SIZE);
+  }
+
+  if (!entityQuery) {
     return [];
   }
+
+  const projection = new Set([
+    'sharedId',
+    'title',
+    `metadata.${extractor.property}`,
+    'language',
+    `metadata.${extractor.source.property}`,
+  ]);
 
   const entities = await entitiesModel.getUnrestricted(
-    {
-      sharedId: { $in: suggestions.map(s => s.entityId) },
-      language: { $in: suggestions.map(s => s.language) },
-    },
-    `sharedId metadata.${extractor.property} metadata.${extractor.source.property} language`
+    entityQuery,
+    Array.from(projection).join(' ')
   );
 
   return entities;
 }
 
-async function getFilesForTraining(templates: ObjectIdSchema[], property: string) {
-  const propertyType = await getPropertyType(templates, property);
-  const entities = await entitiesModel.getUnrestricted(
-    entityForTrainingQuery(templates, property),
-    `sharedId metadata.${property} language`
-  );
-  const entitiesFromTrainingTemplatesIds = entities
-    .filter(x => x.sharedId)
-    .map(x => x.sharedId) as string[];
+async function getFilesForTraining(extractor: IXExtractorType) {
+  const pipeline = new PipelineBuilder();
+  pipeline.add({
+    $match: {
+      extractorId: extractor._id,
+      currentValue: { $nin: ['', null, undefined], $ne: [] },
+    },
+  });
+  pipeline.add({ $limit: MAX_TRAINING_FILES_NUMBER });
 
-  if (!entitiesFromTrainingTemplatesIds.length) {
-    throw new NoLabeledEntities();
-  }
-
-  if (!(await anyFilesSegmented(entitiesFromTrainingTemplatesIds))) {
-    throw new NoSegmentedFiles();
-  }
-
-  const files = (await filesModel.get(
-    await fileQuery(entitiesFromTrainingTemplatesIds),
-    'extractedMetadata entity language filename',
-    { limit: MAX_TRAINING_FILES_NUMBER }
-  )) as (FileType & FileEnforcedNotUndefined)[];
-
-  const indexedEntities = objectIndex(
-    entities,
-    e => e.sharedId! + e.language!,
-    objectIndex.NoTransform
-  );
-
-  const defaultLang = (await settings.getDefaultLanguage())?.key;
-
-  const filesWithEntityValue = files.map(file => {
-    const fileLang = LanguageUtils.fromISO639_3(file.language, false)?.ISO639_1 || defaultLang;
-    const entity = indexedEntities[file.entity + fileLang];
-    if (!entity?.metadata || !entity?.metadata[property]?.length) {
-      return { ...file, propertyType };
-    }
-
-    if (propertyTypeIsWithoutExtractedMetadata(propertyType)) {
-      const propertyValue = (entity.metadata?.[property] || []).map(({ value, label }) => ({
-        value: ensure<string>(value),
-        label: ensure<string>(label),
-      }));
-      return { ...file, propertyValue, propertyType };
-    }
-
-    const [{ value }] = entity.metadata[property] || [{}];
-    let stringValue: string;
-    if (propertyType === propertyTypes.date) {
-      stringValue = moment(<number>value * 1000)
-        .utc()
-        .format('YYYY-MM-DD');
-    } else if (propertyType === propertyTypes.numeric) {
-      stringValue = value?.toString() || '';
-    } else {
-      stringValue = <string>value;
-    }
-
-    return { ...file, propertyValue: stringValue, propertyType };
+  pipeline.add({
+    $lookup: {
+      from: 'entities',
+      localField: 'entityLanguageId',
+      foreignField: '_id',
+      as: 'entityLanguage',
+      pipeline: [
+        {
+          $project: {
+            metadata: `$metadata.${extractor.property}`,
+          },
+        },
+      ],
+    },
+  });
+  pipeline.add({
+    $unwind: '$entityLanguage',
   });
 
-  return getFilesWithAggregations(filesWithEntityValue);
+  pipeline.add({
+    $lookup: {
+      from: 'files',
+      localField: 'fileId',
+      foreignField: '_id',
+      as: 'file',
+      pipeline: [
+        { $match: { status: 'ready' } },
+        {
+          $project: {
+            extractedMetadata: {
+              $filter: {
+                input: '$extractedMetadata',
+                as: 'item',
+                cond: { $eq: ['$$item.name', extractor.property] },
+              },
+            },
+            filename: 1,
+          },
+        },
+      ],
+    },
+  });
+  pipeline.add({
+    $unwind: '$file',
+  });
+
+  pipeline.add({
+    $lookup: {
+      from: 'segmentations',
+      localField: 'fileId',
+      foreignField: 'fileID',
+      as: 'segmentation',
+      pipeline: [
+        { $match: { status: 'ready' } },
+        { $project: { extractedMetadata: 1, filename: 1, xmlname: 1, segmentation: 1 } },
+      ],
+    },
+  });
+  pipeline.add({
+    $unwind: '$segmentation',
+  });
+
+  const targetProperty = await IXServices.getTargetProperty({ extractor });
+  const cursor = IXSuggestionsModel.db.aggregateCursor(pipeline.build()).cursor();
+
+  const process = async (
+    callback: (item: {
+      _id: ObjectId;
+      language: LanguageISO6391;
+      extractedMetadata: any;
+      entity: string;
+      segmentation: any;
+      propertyValue: any;
+      propertyType: PropertyTypeSchema;
+    }) => Promise<void>
+  ) => {
+    await cursor.eachAsync(
+      async ({ fileId, language, file, entityId, entityLanguage, segmentation, currentValue }) => {
+        let propertyValue;
+
+        if (propertyTypeIsWithoutExtractedMetadata(targetProperty.type)) {
+          propertyValue = entityLanguage.metadata.map(({ value, label }: any) => ({
+            value: ensure<string>(value),
+            label: ensure<string>(label),
+          }));
+        } else {
+          propertyValue = currentValue.toString();
+
+          if (targetProperty.type === 'date') {
+            propertyValue = moment(currentValue * 1000)
+              .utc()
+              .format('YYYY-MM-DD');
+          }
+        }
+        const parsed = {
+          _id: fileId,
+          language,
+          extractedMetadata: file?.extractedMetadata || [],
+          entity: entityId,
+          segmentation,
+          propertyValue,
+          propertyType: targetProperty.type,
+        };
+
+        await callback(parsed);
+      }
+    );
+  };
+
+  return { process };
 }
 
 async function getFileIdsWithReadySegmentations(
@@ -314,37 +400,35 @@ async function getFileIdsWithReadySegmentations(
   limit: number
 ): Promise<ObjectIdSchema[]> {
   const [currentModel] = await ixmodels.get({ extractorId });
-
   const targetLimit = limit || BATCH_SIZE_FOR_PDF;
 
-  const query: UwaziFilterQuery<any> = {
+  // Use balanced sampling for all suggestion finding (both test runs and regular runs)
+  // Get extra suggestions since some might have failed segmentations
+  const suggestions = await Suggestions.getBalancedSample(
     extractorId,
-    date: { $lt: currentModel.creationDate },
-  };
+    currentModel,
+    targetLimit * 3
+  );
 
-  if (currentModel.testRun) {
-    query.trainingSample = { $ne: true };
+  if (!suggestions.length) {
+    return [];
   }
 
-  const batchSize = 100;
   const allFileIds: ObjectIdSchema[] = [];
   const suggestionsWithFailedSegmentations: IXSuggestionType[] = [];
 
-  let skip = 0;
-  let hasMore = true;
+  // Process suggestions in batches to check segmentation status (keep existing batching logic)
+  const batchSize = 100;
+  let suggestionIndex = 0;
 
-  while (hasMore && allFileIds.length < targetLimit) {
-    // eslint-disable-next-line no-await-in-loop
-    const suggestions = await IXSuggestionsModel.get(query, 'fileId', {
-      limit: batchSize,
-      skip,
-    });
+  while (suggestionIndex < suggestions.length && allFileIds.length < targetLimit) {
+    const currentBatch = suggestions.slice(suggestionIndex, suggestionIndex + batchSize);
 
-    if (!suggestions.length) {
+    if (!currentBatch.length) {
       break;
     }
 
-    const fileIds = suggestions.map(s => s.fileId).filter((id): id is ObjectIdSchema => !!id);
+    const fileIds = currentBatch.map(s => s.fileId).filter((id): id is ObjectIdSchema => !!id);
 
     if (fileIds.length > 0) {
       // eslint-disable-next-line no-await-in-loop
@@ -354,14 +438,14 @@ async function getFileIdsWithReadySegmentations(
       );
 
       const readySegmentationFileIds = segmentations
-        .filter(seg => seg.status === 'ready' && seg.fileID)
+        .filter(seg => seg.status === 'ready')
         .map(seg => seg.fileID!);
 
       const failedSegmentationFileIds = segmentations
-        .filter(seg => seg.status === 'failed' && seg.fileID)
+        .filter(seg => seg.status === 'failed')
         .map(seg => seg.fileID!);
 
-      const failedSuggestions = suggestions.filter(s =>
+      const failedSuggestions = currentBatch.filter(s =>
         failedSegmentationFileIds.some(failedId => failedId.toString() === s.fileId?.toString())
       );
 
@@ -369,17 +453,20 @@ async function getFileIdsWithReadySegmentations(
       suggestionsWithFailedSegmentations.push(...failedSuggestions);
     }
 
-    skip += batchSize;
-    hasMore = suggestions.length === batchSize;
+    suggestionIndex += batchSize;
   }
 
+  // Keep ALL existing error handling logic unchanged
   if (suggestionsWithFailedSegmentations.length) {
     const modifiedSuggestions = suggestionsWithFailedSegmentations.map(suggestion => ({
       ...suggestion,
-      'state.error': true,
-      'state.obsolete': false,
+      state: {
+        ...suggestion.state,
+        error: true,
+        obsolete: false,
+      },
       status: 'failed' as IXSuggestionType['status'],
-    }));
+    })) as Partial<IXSuggestionType>[];
 
     await IXSuggestionsModel.saveMultiple(modifiedSuggestions);
   }
@@ -387,30 +474,125 @@ async function getFileIdsWithReadySegmentations(
   return allFileIds.slice(0, targetLimit);
 }
 
+function createBaseFileQuery() {
+  return {
+    type: 'document' as const,
+    filename: { $exists: true },
+    language: { $exists: true },
+  };
+}
+
+async function filterFileIdsByReadySegmentations(
+  fileIds: ObjectIdSchema[]
+): Promise<ObjectIdSchema[]> {
+  if (!fileIds.length) return [];
+
+  const segmentations = await SegmentationModel.get(
+    { fileID: { $in: fileIds }, status: 'ready' },
+    'fileID'
+  );
+
+  return segmentations.map(s => s.fileID!);
+}
+
+function createFilesQueryByIds(fileIds: ObjectIdSchema[]) {
+  return {
+    _id: { $in: fileIds },
+    ...createBaseFileQuery(),
+  };
+}
+
+function createFilesQueryByEntities(entityIds: string[]) {
+  return {
+    entity: { $in: entityIds },
+    ...createBaseFileQuery(),
+  };
+}
+
+async function getNextSharedIdsBatch(
+  model: EnforcedWithId<IXModelType>,
+  batchSize: number
+): Promise<string[] | null> {
+  if (!model.findSuggestionsSharedIds?.length) {
+    await ixmodels.unsetFindSuggestionsData(model._id);
+    return null;
+  }
+
+  const sharedIdsToProcess = model.findSuggestionsSharedIds.slice(0, batchSize);
+
+  await ixmodels.updateMany(
+    { _id: model._id },
+    { $set: { findSuggestionsSharedIds: model.findSuggestionsSharedIds.slice(batchSize) } }
+  );
+
+  return sharedIdsToProcess;
+}
+
+async function getFilesForIdsQuery(model: EnforcedWithId<IXModelType>, BATCH_SIZE: number) {
+  const sharedIds = await getNextSharedIdsBatch(model, BATCH_SIZE);
+
+  if (!sharedIds) {
+    return null;
+  }
+
+  // Get all files for these entities
+  const allFiles = await filesModel.get(createFilesQueryByEntities(sharedIds));
+
+  // Filter to only files with ready segmentations
+  const allFileIds = allFiles.map(f => f._id);
+  const readyFileIds = await filterFileIdsByReadySegmentations(allFileIds);
+
+  if (!readyFileIds.length) {
+    return null;
+  }
+
+  return createFilesQueryByIds(readyFileIds);
+}
+
+async function getFilesForSuggestionsQuery(extractorId: ObjectIdSchema, BATCH_SIZE: number) {
+  const readyFileIds = await getFileIdsWithReadySegmentations(extractorId, BATCH_SIZE);
+
+  if (!readyFileIds.length) {
+    return null;
+  }
+
+  return createFilesQueryByIds(readyFileIds);
+}
+
 async function getFilesForSuggestions(extractorId: ObjectIdSchema, limit?: number) {
-  const targetLimit = limit || BATCH_SIZE_FOR_PDF;
+  const [[model], [extractor]] = await Promise.all([
+    ixmodels.get({ extractorId }),
+    Extractors.get({ _id: extractorId }),
+  ]);
 
-  const allFileIds = await getFileIdsWithReadySegmentations(extractorId, targetLimit);
-
-  if (allFileIds.length === 0) {
+  if (!extractor) {
     return [];
   }
 
-  const files = (await filesModel.get(
-    {
-      $and: [
-        {
-          type: 'document',
-          filename: { $exists: true },
-          language: { $exists: true },
-        },
-        { _id: { $in: allFileIds } },
-      ],
-    },
-    'extractedMetadata entity language filename'
-  )) as (FileType & FileEnforcedNotUndefined)[];
+  const BATCH_SIZE = limit || BATCH_SIZE_FOR_PDF;
 
-  return getFilesWithAggregations(files);
+  let filesQuery: UwaziFilterQuery<FileType> | null = {};
+
+  if (model.findSuggestionsRunTimestamp) {
+    filesQuery = await getFilesForIdsQuery(model, BATCH_SIZE);
+  } else {
+    filesQuery = await getFilesForSuggestionsQuery(extractorId, BATCH_SIZE);
+  }
+
+  if (!filesQuery) {
+    return [];
+  }
+
+  const filesToProcess = await filesModel.get(
+    filesQuery,
+    'extractedMetadata entity language filename'
+  );
+
+  const filesWithAggregation = await getFilesWithAggregations(
+    filesToProcess as (FileType & FileEnforcedNotUndefined)[]
+  );
+
+  return filesWithAggregation;
 }
 
 export {

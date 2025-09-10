@@ -2,12 +2,13 @@ import entities from 'api/entities/entities.js';
 import { EntityUpdatedData, EntityUpdatedEvent } from 'api/entities/events/EntityUpdatedEvent';
 import { applicationEventsBus } from 'api/eventsbus';
 import { TemplateSchema } from 'api/migrations/migrations/143-parse-numeric-fields/types';
+import * as setupSockets from 'api/socketio/setupSockets';
 import { elasticTesting } from 'api/utils/elastic_testing';
 import { getFixturesFactory } from 'api/utils/fixturesFactory';
 import testingDB, { DBFixture } from 'api/utils/testing_db';
 import { testingEnvironment } from 'api/utils/testingEnvironment';
-import { testingTenants } from 'api/utils/testingTenants';
 import { EntitySchema } from 'shared/types/entityType';
+import { inspect } from 'util';
 import templates from '../templates';
 
 const f = getFixturesFactory();
@@ -50,35 +51,25 @@ afterAll(async () => {
   await testingEnvironment.tearDown();
 });
 
-async function updateTemplate(template: TemplateSchema, featureFlag: boolean) {
-  if (!featureFlag) {
-    return templates.save(template, 'en');
-  }
-  await new Promise<void>(resolve => {
-    // eslint-disable-next-line @typescript-eslint/no-floating-promises
+async function updateTemplate(template: TemplateSchema) {
+  return new Promise<void>((resolve, reject) => {
+    jest.spyOn(setupSockets, 'emitToTenant').mockImplementation(() => resolve());
     templates
-      .save(template, 'en', true, async () => resolve())
-      .catch(e => {
-        throw e;
-      });
+      .save(template, 'en', true, false, async error => {
+        if (error) {
+          reject(inspect(error));
+        }
+        resolve();
+      })
+      .catch(reject);
   });
 }
 
-async function setUpFixtures(_fixtures: DBFixture, featureFlag: boolean) {
+async function setUpFixtures(_fixtures: DBFixture) {
   await testingEnvironment.setUp(_fixtures, 'templates_denorm_flow');
-  try {
-    await Promise.all(
-      (_fixtures.entities || []).map(async e => entities.save(e, { language: 'en', user: {} }))
-    );
-  } catch (e) {
-    // eslint-disable-next-line no-console
-    console.error(e);
-    throw e;
-  }
-
-  testingTenants.changeCurrentTenant({
-    featureFlags: { templatesDenormalizationPerfImprovements: featureFlag },
-  });
+  await Promise.all(
+    (_fixtures.entities || []).map(async e => entities.save(e, { language: 'en', user: {} }))
+  );
 }
 
 describe('templates save', () => {
@@ -155,13 +146,9 @@ describe('templates save', () => {
       ),
     ],
   };
-  describe.each([
-    // prettier-ignore
-    { featureFlag: false },
-    { featureFlag: true },
-  ])('templates denormalization scenarios (feature flag -> $featureFlag)', ({ featureFlag }) => {
+  describe('templates denormalization scenarios', () => {
     beforeAll(async () => {
-      await setUpFixtures(fixtures, featureFlag);
+      await setUpFixtures(fixtures);
     });
 
     describe('when changing a property name and template contains relationship properties', () => {
@@ -174,7 +161,7 @@ describe('templates save', () => {
           propertyWithNameChanged,
         ]);
 
-        await updateTemplate(template, featureFlag);
+        await updateTemplate(template);
 
         const expectedEn = [
           { sharedId: 'entityB1', metadata: { name_changed: [] } },
@@ -194,7 +181,7 @@ describe('templates save', () => {
           }),
         ]);
 
-        await updateTemplate(template, featureFlag);
+        await updateTemplate(template);
 
         const expectedEn = [
           {
@@ -234,7 +221,7 @@ describe('templates save', () => {
           }),
         ]);
 
-        await updateTemplate(template, featureFlag);
+        await updateTemplate(template);
 
         const expected = [
           { sharedId: 'entityB1', metadata: { rel_prop: [] } },
@@ -246,14 +233,25 @@ describe('templates save', () => {
       });
 
       it('should create metadata values if connections with the new relationType exist', async () => {
-        await setUpFixtures(
-          {
-            ...fixtures,
-            entities: [...(fixtures.entities || []), f.entity('entityA3', 'templateA', {})],
-            connections: [...createConnection('entityB1', 'entityA3', 'rel2', 'hub1')],
-          },
-          featureFlag
-        );
+        await setUpFixtures({
+          ...fixtures,
+          entities: [
+            ...(fixtures.entities || []),
+            f.entity(
+              'entityA3',
+              'templateA',
+              {},
+              { title: 'entityA3 english', icon: { label: 'icon' }, language: 'en' }
+            ),
+            f.entity(
+              'entityA3',
+              'templateA',
+              {},
+              { title: 'entityA3 spanish', icon: { label: 'icon' }, language: 'es' }
+            ),
+          ],
+          connections: [...createConnection('entityB1', 'entityA3', 'rel2', 'hub1')],
+        });
 
         const template = f.template('templateB', [
           f.relationshipProp('rel_prop', 'templateA', {
@@ -261,10 +259,13 @@ describe('templates save', () => {
           }),
         ]);
 
-        await updateTemplate(template, featureFlag);
+        await updateTemplate(template);
 
         const expected = [
-          { sharedId: 'entityB1', metadata: { rel_prop: [{ label: 'entityA3' }] } },
+          {
+            sharedId: 'entityB1',
+            metadata: { rel_prop: [{ label: 'entityA3 english', icon: { label: 'icon' } }] },
+          },
           { sharedId: 'entityB2', metadata: { rel_prop: [] } },
         ];
 
@@ -277,7 +278,7 @@ describe('templates save', () => {
       it('should delete values belonging to the previous content', async () => {
         const template = f.template('templateB', [f.relationshipProp('rel_prop', 'templateC')]);
 
-        await updateTemplate(template, featureFlag);
+        await updateTemplate(template);
 
         expect(await getEntitiesByTemplate('templateB')).toMatchObject([
           { sharedId: 'entityB1', metadata: { rel_prop: [] } },
@@ -286,30 +287,30 @@ describe('templates save', () => {
       });
 
       it('should create metadata values if connections to entities with the new content (target template) exist', async () => {
-        await setUpFixtures(
-          {
-            ...fixtures,
-            entities: [...(fixtures.entities || []), f.entity('entityC1', 'templateC', {})],
-            connections: [
-              ...createConnection('entityC1', 'entityB1', 'rel', 'hub1'),
-              ...createConnection('entityC1', 'entityB2', 'rel', 'hub1'),
-            ],
-          },
-          featureFlag
-        );
+        await setUpFixtures({
+          ...fixtures,
+          entities: [
+            ...(fixtures.entities || []),
+            f.entity('entityC1', 'templateC', {}, { title: 'entityC1 english', language: 'en' }),
+            f.entity('entityC1', 'templateC', {}, { title: 'entityC1 spanish', language: 'es' }),
+          ],
+          connections: [
+            ...createConnection('entityC1', 'entityB1', 'rel', 'hub1'),
+            ...createConnection('entityC1', 'entityB2', 'rel', 'hub1'),
+          ],
+        });
 
         await updateTemplate(
           f.template('templateB', [
             f.relationshipProp('rel_prop', 'templateC', {
               relationType: f.idString('rel'),
             }),
-          ]),
-          featureFlag
+          ])
         );
 
         const expected = [
-          { sharedId: 'entityB1', metadata: { rel_prop: [{ label: 'entityC1' }] } },
-          { sharedId: 'entityB2', metadata: { rel_prop: [{ label: 'entityC1' }] } },
+          { sharedId: 'entityB1', metadata: { rel_prop: [{ label: 'entityC1 english' }] } },
+          { sharedId: 'entityB2', metadata: { rel_prop: [{ label: 'entityC1 english' }] } },
         ];
 
         expect(await getEntitiesByTemplate('templateB')).toMatchObject(expected);
@@ -321,39 +322,39 @@ describe('templates save', () => {
         const hub1 = f.id('hub1');
         const hub2 = f.id('hub2');
         const hub3 = f.id('hub3');
-        await setUpFixtures(
-          {
-            ...fixtures,
-            entities: [...(fixtures.entities || []), f.entity('entityC1', 'templateC', {})],
-            connections: [
-              { _id: testingDB.id(), entity: 'entityC1', template: f.idString('rel'), hub: hub1 },
-              { _id: testingDB.id(), entity: 'entityB1', hub: hub1 },
+        await setUpFixtures({
+          ...fixtures,
+          entities: [
+            ...(fixtures.entities || []),
+            f.entity('entityC1', 'templateC', {}, { title: 'entityC1 english', language: 'en' }),
+            f.entity('entityC1', 'templateC', {}, { title: 'entityC1 spanish', language: 'es' }),
+          ],
+          connections: [
+            { _id: testingDB.id(), entity: 'entityC1', template: f.idString('rel'), hub: hub1 },
+            { _id: testingDB.id(), entity: 'entityB1', hub: hub1 },
 
-              { _id: testingDB.id(), entity: 'entityC1', template: f.idString('rel'), hub: hub2 },
-              { _id: testingDB.id(), entity: 'entityB2', hub: hub2 },
+            { _id: testingDB.id(), entity: 'entityC1', template: f.idString('rel'), hub: hub2 },
+            { _id: testingDB.id(), entity: 'entityB2', hub: hub2 },
 
-              { _id: testingDB.id(), entity: 'entityA1', template: f.idString('rel'), hub: hub3 },
-              { _id: testingDB.id(), entity: 'entityB2', hub: hub3 },
-            ],
-          },
-          featureFlag
-        );
+            { _id: testingDB.id(), entity: 'entityA1', template: f.idString('rel'), hub: hub3 },
+            { _id: testingDB.id(), entity: 'entityB2', hub: hub3 },
+          ],
+        });
 
         await updateTemplate(
           f.template('templateB', [
             f.relationshipProp('rel_prop', undefined, {
               relationType: f.idString('rel'),
             }),
-          ]),
-          featureFlag
+          ])
         );
 
         const expected = [
-          { sharedId: 'entityB1', metadata: { rel_prop: [{ label: 'entityC1' }] } },
+          { sharedId: 'entityB1', metadata: { rel_prop: [{ label: 'entityC1 english' }] } },
 
           {
             sharedId: 'entityB2',
-            metadata: { rel_prop: [{ label: 'entityC1' }, { label: 'entityA1 english' }] },
+            metadata: { rel_prop: [{ label: 'entityC1 english' }, { label: 'entityA1 english' }] },
           },
         ];
 
@@ -364,38 +365,38 @@ describe('templates save', () => {
 
     describe('when "content" (target template) is empty (any template) AND ALL CONNECTIONS HAVE RelationType (even the parent)', () => {
       it('should the values created include itself ????? (this is the current behaviour)', async () => {
-        await setUpFixtures(
-          {
-            ...fixtures,
-            entities: [...(fixtures.entities || []), f.entity('entityC1', 'templateC', {})],
-            connections: [
-              ...createConnection('entityC1', 'entityB1', 'rel', 'hub1'),
-              ...createConnection('entityC1', 'entityB2', 'rel', 'hub2'),
-              ...createConnection('entityA1', 'entityB2', 'rel', 'hub3'),
-            ],
-          },
-          featureFlag
-        );
+        await setUpFixtures({
+          ...fixtures,
+          entities: [
+            ...(fixtures.entities || []),
+            f.entity('entityC1', 'templateC', {}, { title: 'entityC1 english', language: 'en' }),
+            f.entity('entityC1', 'templateC', {}, { title: 'entityC1 spanish', language: 'es' }),
+          ],
+          connections: [
+            ...createConnection('entityC1', 'entityB1', 'rel', 'hub1'),
+            ...createConnection('entityC1', 'entityB2', 'rel', 'hub2'),
+            ...createConnection('entityA1', 'entityB2', 'rel', 'hub3'),
+          ],
+        });
 
         await updateTemplate(
           f.template('templateB', [
             f.relationshipProp('rel_prop', undefined, {
               relationType: f.idString('rel'),
             }),
-          ]),
-          featureFlag
+          ])
         );
 
         const expected = [
           {
             sharedId: 'entityB1',
-            metadata: { rel_prop: [{ label: 'entityC1' }, { label: 'entityB1 english' }] },
+            metadata: { rel_prop: [{ label: 'entityC1 english' }, { label: 'entityB1 english' }] },
           },
           {
             sharedId: 'entityB2',
             metadata: {
               rel_prop: [
-                { label: 'entityC1' },
+                { label: 'entityC1 english' },
                 { label: 'entityB2 english' },
                 { label: 'entityA1 english' },
               ],
@@ -410,34 +411,31 @@ describe('templates save', () => {
 
     describe('when 2 relationships point to the same template/rel combination but different inherit props', () => {
       it('should properly dernomalize both props', async () => {
-        await setUpFixtures(
-          {
-            ...fixtures,
-            templates: [
-              ...fixtures.templates,
-              f.template('templateD', [
-                f.relationshipProp('rel_prop', 'templateA'),
-                f.relationshipProp('rel_prop2', 'templateA'),
-              ]),
-            ],
-            entities: [
-              ...(fixtures.entities || []),
-              f.entity('entityD1', 'templateD', {
-                rel_prop: [f.metadataValue('entityA1', '')],
-                rel_prop2: [f.metadataValue('entityA1', '')],
-              }),
-              f.entity('entityD2', 'templateD', {
-                rel_prop: [f.metadataValue('entityA2', '')],
-                rel_prop2: [f.metadataValue('entityA2', '')],
-              }),
-            ],
-            connections: [
-              ...createConnection('entityD1', 'entityA1', 'rel', 'hub1'),
-              ...createConnection('entityD2', 'entityA2', 'rel', 'hub1'),
-            ],
-          },
-          featureFlag
-        );
+        await setUpFixtures({
+          ...fixtures,
+          templates: [
+            ...fixtures.templates,
+            f.template('templateD', [
+              f.relationshipProp('rel_prop', 'templateA'),
+              f.relationshipProp('rel_prop2', 'templateA'),
+            ]),
+          ],
+          entities: [
+            ...(fixtures.entities || []),
+            f.entity('entityD1', 'templateD', {
+              rel_prop: [f.metadataValue('entityA1', '')],
+              rel_prop2: [f.metadataValue('entityA1', '')],
+            }),
+            f.entity('entityD2', 'templateD', {
+              rel_prop: [f.metadataValue('entityA2', '')],
+              rel_prop2: [f.metadataValue('entityA2', '')],
+            }),
+          ],
+          connections: [
+            ...createConnection('entityD1', 'entityA1', 'rel', 'hub1'),
+            ...createConnection('entityD2', 'entityA2', 'rel', 'hub1'),
+          ],
+        });
 
         await updateTemplate(
           f.template('templateD', [
@@ -445,8 +443,7 @@ describe('templates save', () => {
             f.relationshipProp('rel_prop2', 'templateA', {
               inherit: { property: f.idString('text_property'), type: 'text' },
             }),
-          ]),
-          featureFlag
+          ])
         );
 
         const expected = [
@@ -479,34 +476,30 @@ describe('templates save', () => {
         const hub1 = f.id('hub1');
         const hub2 = f.id('hub2');
 
-        await setUpFixtures(
-          {
-            ...fixtures,
-            templates: [...fixtures.templates, f.template('templateD', [])],
-            entities: [
-              ...(fixtures.entities || []),
-              f.entity('entityD1', 'templateD', {}, { title: 'entityD1 english', language: 'en' }),
-              f.entity('entityD1', 'templateD', {}, { title: 'entityD1 spanish', language: 'es' }),
+        await setUpFixtures({
+          ...fixtures,
+          templates: [...fixtures.templates, f.template('templateD', [])],
+          entities: [
+            ...(fixtures.entities || []),
+            f.entity('entityD1', 'templateD', {}, { title: 'entityD1 english', language: 'en' }),
+            f.entity('entityD1', 'templateD', {}, { title: 'entityD1 spanish', language: 'es' }),
 
-              f.entity('entityD2', 'templateD', {}, { title: 'entityD2 english', language: 'en' }),
-              f.entity('entityD2', 'templateD', {}, { title: 'entityD2 spanish', language: 'es' }),
-            ],
-            connections: [
-              { _id: testingDB.id(), entity: 'entityA1', template: f.idString('rel'), hub: hub1 },
-              { _id: testingDB.id(), entity: 'entityD1', hub: hub1 },
+            f.entity('entityD2', 'templateD', {}, { title: 'entityD2 english', language: 'en' }),
+            f.entity('entityD2', 'templateD', {}, { title: 'entityD2 spanish', language: 'es' }),
+          ],
+          connections: [
+            { _id: testingDB.id(), entity: 'entityA1', template: f.idString('rel'), hub: hub1 },
+            { _id: testingDB.id(), entity: 'entityD1', hub: hub1 },
 
-              { _id: testingDB.id(), entity: 'entityA2', template: f.idString('rel'), hub: hub2 },
-              { _id: testingDB.id(), entity: 'entityD2', hub: hub2 },
-            ],
-          },
-          featureFlag
-        );
+            { _id: testingDB.id(), entity: 'entityA2', template: f.idString('rel'), hub: hub2 },
+            { _id: testingDB.id(), entity: 'entityD2', hub: hub2 },
+          ],
+        });
 
         await updateTemplate(
           f.template('templateD', [
             f.relationshipProp('new_rel_prop', 'templateA', { relationType: f.idString('rel') }),
-          ]),
-          featureFlag
+          ])
         );
 
         const expectedEn = [
@@ -551,7 +544,7 @@ describe('templates save', () => {
         applicationEventsBus.on(EntityUpdatedEvent, async triggeredEventData => {
           eventData.push(triggeredEventData);
         });
-        await updateTemplate(template, featureFlag);
+        await updateTemplate(template);
 
         const sortedEvents = eventData.sort((a, b) =>
           (a.before[0]?.sharedId || '').localeCompare(b.before[0]?.sharedId || '')
@@ -615,23 +608,22 @@ describe('templates save', () => {
 
   describe('when feature flag is true', () => {
     it('should not allow updating a template that is currently being processed', async () => {
-      await setUpFixtures(
-        {
-          ...fixtures,
-          templates: [
-            f.template('templateA', [f.property('text_property')]),
-            {
-              ...f.template('templateB', [
-                f.relationshipProp('rel_prop', 'templateA'),
-                f.property('text_property_b'),
-              ]),
-              processing: true,
+      await setUpFixtures({
+        ...fixtures,
+        templates: [
+          f.template('templateA', [f.property('text_property')]),
+          {
+            ...f.template('templateB', [
+              f.relationshipProp('rel_prop', 'templateA'),
+              f.property('text_property_b'),
+            ]),
+            processing: {
+              active: true,
             },
-            f.template('templateC', [f.property('text_property_2')]),
-          ],
-        },
-        true
-      );
+          },
+          f.template('templateC', [f.property('text_property_2')]),
+        ],
+      });
 
       const propertyWithNameChanged = f.property('text_property_b', 'text', {
         label: 'name_changed',
@@ -646,7 +638,7 @@ describe('templates save', () => {
     });
 
     it('should again allow updating a template when the processing has finished', async () => {
-      await setUpFixtures(fixtures, true);
+      await setUpFixtures(fixtures);
 
       const propertyWithNameChanged = f.property('text_property_b', 'text', {
         label: 'name_changed',
@@ -661,39 +653,9 @@ describe('templates save', () => {
         propertyWithNameChanged,
       ]);
 
-      await new Promise<void>(resolve => {
-        // eslint-disable-next-line @typescript-eslint/no-floating-promises
-        templates.save(template, 'en', true, async () => resolve());
-      });
+      await updateTemplate(template);
 
-      await expect(updateTemplate(modifiedTemplate, true)).resolves.not.toThrow();
-    });
-  });
-
-  describe('when feature flag is false', () => {
-    it('should be able to save even if the template is processing (and should remove the flag also)', async () => {
-      await setUpFixtures(
-        {
-          ...fixtures,
-          templates: [
-            f.template('templateA', [f.property('text_property')]),
-            {
-              ...f.template('templateB', [
-                f.relationshipProp('rel_prop', 'templateA'),
-                f.property('text_property_b'),
-              ]),
-              processing: true,
-            },
-            f.template('templateC', [f.property('text_property_2')]),
-          ],
-        },
-        false
-      );
-
-      const template = f.template('templateB');
-      template.processing = true;
-      const savedTemplate = await templates.save(template, 'en');
-      expect(savedTemplate.processing).toBeUndefined();
+      await expect(updateTemplate(modifiedTemplate)).resolves.not.toThrow();
     });
   });
 });

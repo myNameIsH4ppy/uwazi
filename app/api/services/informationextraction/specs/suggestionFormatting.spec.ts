@@ -116,12 +116,18 @@ const currentSuggestions: Record<string, IXSuggestionType> = {
   multiselect: {
     ...currentSuggestionBase,
     propertyName: 'multiselect_property',
-    suggestedValue: ['A_id', 'B_id'],
+    suggestedValue: [
+      { id: 'A_id', label: 'A', segment: 'A_segment' },
+      { id: 'B_id', label: 'B', segment: 'B_segment' },
+    ],
   },
   relationship: {
     ...currentSuggestionBase,
     propertyName: 'relationship_property',
-    suggestedValue: ['related_1_id', 'related_2_id'],
+    suggestedValue: [
+      { id: 'related_1_id', label: 'related_1_title' },
+      { id: 'related_2_id', label: 'related_2_title' },
+    ],
   },
 };
 
@@ -417,9 +423,51 @@ describe('formatSuggestion', () => {
       entities.text,
       successMessage
     );
+
     expect(result).toEqual({
       ...currentSuggestions.text,
       date: expect.any(Number),
+      suggestedValue: 'recommended_value',
+      segment: 'new context',
+      selectionRectangles: [
+        {
+          top: 0,
+          left: 0,
+          width: 0,
+          height: 0,
+          page: '1',
+        },
+      ],
+    });
+  });
+
+  it('should keep model-specific properties', async () => {
+    const property = properties.text;
+    const currentSuggestion = {
+      ...currentSuggestions.text,
+      modelData: {
+        findSuggestionsRunTimestamp: 1234,
+      },
+    };
+
+    const rawSuggestion = {
+      ...validRawSuggestions.text,
+      extra: 'extra',
+    };
+    const result = await formatSuggestionFacade.formatSuggestionPdfSource(
+      property,
+      rawSuggestion,
+      currentSuggestion,
+      entities.text,
+      successMessage
+    );
+
+    expect(result).toEqual({
+      ...currentSuggestions.text,
+      date: expect.any(Number),
+      modelData: {
+        findSuggestionsRunTimestamp: 1234,
+      },
       suggestedValue: 'recommended_value',
       segment: 'new context',
       selectionRectangles: [
@@ -546,7 +594,10 @@ describe('formatSuggestion', () => {
       expectedResult: {
         ...currentSuggestions.multiselect,
         date: expect.any(Number),
-        suggestedValue: ['C_id', 'D_id'],
+        suggestedValue: [
+          { id: 'C_id', label: 'C' },
+          { id: 'D_id', label: 'D' },
+        ],
         segment: 'new context',
       },
     },
@@ -559,7 +610,10 @@ describe('formatSuggestion', () => {
       expectedResult: {
         ...currentSuggestions.relationship,
         date: expect.any(Number),
-        suggestedValue: ['related_1_id', 'related_3_id'],
+        suggestedValue: [
+          { id: 'related_1_id', label: 'related_1_title' },
+          { id: 'related_3_id', label: 'related_3_title' },
+        ],
         segment: 'new context',
       },
     },
@@ -599,6 +653,29 @@ describe('formatSuggestion', () => {
     }
   );
 
+  it('should return formatted suggestion for valid multiselect suggestions with segment_text in values', () => {
+    const rawSuggestion = {
+      ...validRawSuggestions.multiselect,
+      values: [
+        { id: 'C_id', label: 'C', segment_text: 'context for C' },
+        { id: 'D_id', label: 'D', segment_text: 'context for D' },
+      ],
+    };
+    const suggestion = formatSuggestionFacade.formatSuggestionPdfSource(
+      properties.multiselect,
+      rawSuggestion,
+      currentSuggestions.multiselect,
+      entities.multiselect,
+      successMessage
+    );
+
+    expect(suggestion.suggestedValue).toEqual([
+      { id: 'C_id', label: 'C', segment: 'context for C' },
+      { id: 'D_id', label: 'D', segment: 'context for D' },
+    ]);
+    expect(suggestion.segment).toBe('new context');
+  });
+
   it('should fallback to empty string when suggested date is incorrect', () => {
     const inputs = {
       property: properties.date,
@@ -629,5 +706,51 @@ describe('formatSuggestion', () => {
     expect(suggestion2).toMatchObject({
       suggestedValue: '',
     });
+  });
+
+  it('should return formatted suggestion for valid relationship suggestions with segment in values', () => {
+    const rawSuggestion = {
+      ...validRawSuggestions.relationship,
+      values: [
+        { id: 'related_1_id', label: 'related_1_title', segment_text: 'context for related 1' },
+        { id: 'related_3_id', label: 'related_3_title', segment_text: 'context for related 3' },
+      ],
+    };
+    const suggestion = formatSuggestionFacade.formatSuggestionPdfSource(
+      properties.relationship,
+      rawSuggestion,
+      currentSuggestions.relationship,
+      entities.relationship,
+      successMessage
+    );
+
+    expect(suggestion.suggestedValue).toEqual([
+      { id: 'related_1_id', label: 'related_1_title', segment: 'context for related 1' },
+      { id: 'related_3_id', label: 'related_3_title', segment: 'context for related 3' },
+    ]);
+    expect(suggestion.segment).toBe('new context');
+  });
+
+  it('should handle suggestions without segment_text in values for multiselect', () => {
+    const rawSuggestion = {
+      ...validRawSuggestions.multiselect,
+      values: [
+        { id: 'C_id', label: 'C' },
+        { id: 'D_id', label: 'D' },
+      ],
+    };
+    const suggestion = formatSuggestionFacade.formatSuggestionPdfSource(
+      properties.multiselect,
+      rawSuggestion,
+      currentSuggestions.multiselect,
+      entities.multiselect,
+      successMessage
+    );
+
+    expect(suggestion.suggestedValue).toEqual([
+      { id: 'C_id', label: 'C' },
+      { id: 'D_id', label: 'D' },
+    ]);
+    expect(suggestion.segment).toBe('new context');
   });
 });

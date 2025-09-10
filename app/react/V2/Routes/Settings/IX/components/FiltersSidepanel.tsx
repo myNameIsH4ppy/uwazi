@@ -2,26 +2,53 @@
 /* eslint-disable max-statements */
 /* eslint-disable react/jsx-props-no-spreading */
 import React from 'react';
-import { Translate } from 'app/I18N';
-import { Button, Card, Sidepanel } from 'V2/Components/UI';
-import { Checkbox } from 'app/V2/Components/Forms';
 import { useForm } from 'react-hook-form';
 import { useSearchParams } from 'react-router';
+import { Translate } from 'app/I18N';
+import { Button, Card, Sidepanel } from 'V2/Components/UI';
+import { Checkbox } from 'V2/Components/Forms';
+import { StatsTooltip } from './Tooltip';
 
-interface FiltersSidepanelProps {
-  showSidepanel: boolean;
-  setShowSidepanel: React.Dispatch<React.SetStateAction<boolean>>;
-  aggregation: any;
-}
+type Aggregations = {
+  total: number;
+  labeled: number;
+  nonLabeled: number;
+  nonProcessed: number;
+  obsolete: number;
+  error: number;
+  match: number;
+  mismatch: number;
+  noContext: number;
+  accuracy: number;
+};
 
-interface IXFilters {
+type IXFilters = {
   labeled: boolean;
   nonLabeled: boolean;
   match: boolean;
   mismatch: boolean;
   obsolete: boolean;
   error: boolean;
+  noContext: boolean;
+  nonProcessed: boolean;
+};
+
+interface FiltersSidepanelProps {
+  showSidepanel: boolean;
+  setShowSidepanel: React.Dispatch<React.SetStateAction<boolean>>;
+  aggregation: Aggregations;
 }
+
+const defaultFilter: IXFilters = {
+  labeled: false,
+  nonLabeled: false,
+  match: false,
+  mismatch: false,
+  obsolete: false,
+  error: false,
+  noContext: false,
+  nonProcessed: false,
+};
 
 const FiltersSidepanel = ({
   showSidepanel,
@@ -29,15 +56,6 @@ const FiltersSidepanel = ({
   aggregation,
 }: FiltersSidepanelProps) => {
   const [searchParams, setSearchParams] = useSearchParams();
-
-  const defaultFilter: IXFilters = {
-    labeled: false,
-    nonLabeled: false,
-    match: false,
-    mismatch: false,
-    obsolete: false,
-    error: false,
-  };
 
   let initialFilters = defaultFilter;
 
@@ -89,7 +107,10 @@ const FiltersSidepanel = ({
       <form onSubmit={handleSubmit(submitFilters)} className="flex flex-col h-full">
         <Sidepanel.Body className="flex flex-col flex-grow gap-4">
           <Card>
-            <div className="flex items-center space-x-0.5">
+            <div className="text-sm font-semibold text-gray-700 mb-2">
+              <Translate>All data</Translate>
+            </div>
+            <div className="flex items-center space-x-1">
               <Checkbox
                 label={<Translate className="font-normal">Labeled</Translate>}
                 {...register('labeled')}
@@ -112,32 +133,23 @@ const FiltersSidepanel = ({
               <div className="flex-none font-mono font-bold">{aggregation.nonLabeled}</div>
             </div>
           </Card>
+
           <Card>
-            <div className="flex items-center space-x-0.5">
-              <Checkbox
-                label={<Translate className="font-normal">Match</Translate>}
-                {...register('match')}
-                onChange={e => {
-                  checkOption(e, 'match');
-                }}
-              />
-              <div className="flex-1 border-t border-dashed border-t-gray-200" />
-              <div className="flex-none font-mono font-bold">{aggregation.match}</div>
+            <div className="text-sm font-semibold text-gray-700 mb-2">
+              <Translate>Status</Translate>
             </div>
             <div className="flex items-center space-x-1">
               <Checkbox
-                label={<Translate className="font-normal">Mismatch</Translate>}
-                {...register('mismatch')}
+                label={<Translate className="font-normal">Non processed</Translate>}
+                {...register('nonProcessed')}
                 onChange={e => {
-                  checkOption(e, 'mismatch');
+                  checkOption(e, 'nonProcessed');
                 }}
               />
               <div className="flex-1 border-t border-dashed border-t-gray-200" />
-              <div className="flex-none font-mono font-bold">{aggregation.mismatch}</div>
+              <div className="flex-none font-mono font-bold">{aggregation.nonProcessed}</div>
             </div>
-          </Card>
-          <Card>
-            <div className="flex items-center space-x-0.5">
+            <div className="flex items-center space-x-1">
               <Checkbox
                 label={<Translate className="font-normal">Obsolete</Translate>}
                 {...register('obsolete')}
@@ -160,6 +172,61 @@ const FiltersSidepanel = ({
               <div className="flex-none font-mono font-bold">{aggregation.error}</div>
             </div>
           </Card>
+
+          <Card>
+            <div className="text-sm text-gray-700 mb-2">
+              <Translate className="font-semibold">Processed</Translate>
+            </div>
+            <div className="flex items-center space-x-1">
+              <Checkbox
+                label={<Translate className="font-normal">Match</Translate>}
+                {...register('match')}
+                onChange={e => {
+                  checkOption(e, 'match');
+                }}
+              />
+              <div className="flex-1 border-t border-dashed border-t-gray-200" />
+              <div className="flex-none font-mono font-bold">{aggregation.match}</div>
+            </div>
+            <div className="flex items-center space-x-1">
+              <Checkbox
+                label={<Translate className="font-normal">Mismatch</Translate>}
+                {...register('mismatch')}
+                onChange={e => {
+                  checkOption(e, 'mismatch');
+                }}
+              />
+              <div className="flex-1 border-t border-dashed border-t-gray-200" />
+              <div className="flex-none font-mono font-bold">{aggregation.mismatch}</div>
+            </div>
+            <div className="flex items-center space-x-1">
+              <Checkbox
+                label={<Translate className="font-normal">No context</Translate>}
+                {...register('noContext')}
+                onChange={e => {
+                  checkOption(e, 'noContext');
+                }}
+              />
+              <div className="flex-1 border-t border-dashed border-t-gray-200" />
+              <div className="flex-none font-mono font-bold">{aggregation.noContext}</div>
+            </div>
+          </Card>
+
+          <Card>
+            <div className="text-sm font-semibold text-gray-700 mb-2">
+              <Translate>Statistics</Translate>
+            </div>
+            <dl className="flex items-center space-x-1" role="list">
+              <div className="flex gap-2 items-center">
+                <StatsTooltip content="accuracy" />
+                <dt className="font-normal not-italic text-gray-900">
+                  <Translate>Accuracy</Translate>
+                </dt>
+              </div>
+              <div className="flex-1 border-t border-dashed border-t-gray-200" />
+              <dd className="flex-none font-mono font-bold">{aggregation.accuracy}%</dd>
+            </dl>
+          </Card>
         </Sidepanel.Body>
         <Sidepanel.Footer className="px-4 py-3">
           <div className="flex gap-2">
@@ -176,4 +243,5 @@ const FiltersSidepanel = ({
   );
 };
 
+export type { FiltersSidepanelProps };
 export { FiltersSidepanel };

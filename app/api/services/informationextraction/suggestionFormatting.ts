@@ -93,7 +93,11 @@ const simpleSuggestion = (
 });
 
 function multiValueIdsSuggestion(rawSuggestion: ValuesSelectionSuggestion) {
-  const suggestedValue = rawSuggestion.values.map(value => value.id);
+  const suggestedValue = rawSuggestion.values.map(value => ({
+    id: value.id,
+    label: value.label,
+    ...(value.segment_text && { segment: value.segment_text }),
+  }));
 
   const suggestion: Partial<IXSuggestionType> = {
     suggestedValue,
@@ -350,6 +354,7 @@ const formatSuggestionPdfSource = (
   currentSuggestion: IXSuggestionType,
   entity: EntitySchema,
   message: InternalIXResultsMessage
+  // eslint-disable-next-line max-params
 ) => {
   const suggestion: IXSuggestionType = {
     ...currentSuggestion,

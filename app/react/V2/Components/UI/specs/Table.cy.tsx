@@ -240,18 +240,24 @@ describe('Table', () => {
       checkRowContent(8, [undefined, 'Sub 1-1', dataWithNested[0].subRows[0].description, '5']);
     });
 
-    it('should allow manually controlling the sorting', () => {
-      const setSortingSpy = cy.stub().as('setSortingSpy');
-      Basic.args.sortingFn = setSortingSpy;
+    describe('Controlled sorting', () => {
+      it('should allow manually controlling the sorting', () => {
+        Basic.args.controlledSorting = true;
+        mount(<Basic />);
+        cy.get('th').contains('Title').realClick();
+        cy.get('[data-testid="controlled-sorting"]').within(() => {
+          cy.contains('p', 'Sorted by title');
+        });
+      });
 
-      mount(<Basic />);
-      checkRowContent(1, ['Entity 2', data[0].description, '2']);
-      cy.get('th').contains('Title').realClick();
-      checkRowContent(1, ['Entity 2', data[0].description, '2']);
-
-      cy.get('@setSortingSpy').should('have.been.calledTwice');
-      cy.get('@setSortingSpy').should('have.been.calledWith', []);
-      cy.get('@setSortingSpy').should('have.been.calledWith', [{ id: 'title', desc: false }]);
+      it('should respect the default sorting in the state', () => {
+        Basic.args.controlledSorting = true;
+        Basic.args.defaultSorting = [{ id: 'created', desc: false }];
+        mount(<Basic />);
+        cy.get('[data-testid="controlled-sorting"]').within(() => {
+          cy.contains('p', 'Sorted by created');
+        });
+      });
     });
   });
 
@@ -281,25 +287,17 @@ describe('Table', () => {
 
     it('should reset selections when adding a new entry to the table', () => {
       cy.contains('Select all').realClick();
-      cy.contains('button', 'Save changes').realClick();
-      cy.get('[data-testid="selected-items"]').within(() => {
-        cy.contains('Entity 1');
-        cy.contains('Entity 2');
-        cy.contains('Entity 3');
-        cy.contains('Entity 4');
-        cy.contains('Entity 5');
-      });
       cy.get('#checkbox-header').should('be.checked');
-
       cy.contains('button', 'Add new item').realClick();
+      cy.get('tbody tr').should('have.length', 6);
       cy.get('#checkbox-header').should('not.be.checked');
     });
 
     it('should reset selections when removing an item from the table', () => {
       cy.contains('Select all').realClick();
-      cy.contains('button', 'Save changes').realClick();
       cy.get('#checkbox-header').should('be.checked');
       cy.contains('button', 'Remove last item').realClick();
+      cy.get('tbody tr').should('have.length', 4);
       cy.get('#checkbox-header').should('not.be.checked');
     });
 

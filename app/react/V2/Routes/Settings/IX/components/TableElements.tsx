@@ -3,6 +3,7 @@
 import React from 'react';
 import { Cell, CellContext, Row, createColumnHelper } from '@tanstack/react-table';
 import { useAtom } from 'jotai';
+import { get } from 'lodash';
 import { Link } from 'react-router';
 import { CheckCircleIcon } from '@heroicons/react/24/outline';
 import { Button, Pill } from 'V2/Components/UI';
@@ -20,7 +21,8 @@ import {
 } from '../types';
 import { Dot } from './Dot';
 import { SuggestedValue } from './SuggestedValue';
-import { ixAcceptedSuggestions } from './ixSuggestionsAtom';
+import { acceptedSuggestions } from './atoms';
+import { ContextCell } from './ContextCell';
 
 const extractorColumnHelper = createColumnHelper<TableExtractor>();
 const suggestionColumnHelper = createColumnHelper<TableSuggestion>();
@@ -30,7 +32,10 @@ const statusColor = (suggestion: TableSuggestion): Color => {
     return 'red';
   }
 
-  if (suggestion.currentValue === suggestion.suggestedValue) {
+  if (
+    suggestion.currentValue === suggestion.suggestedValue ||
+    suggestion.currentValue === get(suggestion.suggestedValue, 'id')
+  ) {
     return 'green';
   }
 
@@ -42,7 +47,7 @@ const statusColor = (suggestion: TableSuggestion): Color => {
       (value: SuggestionValue) =>
         suggestion.suggestedValue &&
         (suggestion.suggestedValue as SuggestionValue[]).some(
-          (suggested: SuggestionValue) => suggested === value
+          (suggested: SuggestionValue) => suggested === value || value === get(suggested, 'id')
         )
     )
   ) {
@@ -90,7 +95,10 @@ const RenderParent = ({ suggestion }: { suggestion: MultiValueSuggestion }) => {
   const suggestions = suggestion.subRows;
   const ammountOfSuggestions = suggestions?.length || 0;
   const amountOfValues = suggestions?.filter(s => s.currentValue).length || 0;
-  const amountOfMatches = suggestions?.filter(s => s.currentValue === s.suggestedValue).length || 0;
+  const amountOfMatches =
+    suggestions?.filter(
+      s => s.currentValue === s.suggestedValue || s.currentValue === get(s.suggestedValue, 'id')
+    ).length || 0;
   const amountOfMissmatches = ammountOfSuggestions - amountOfMatches;
 
   return (
@@ -131,16 +139,6 @@ const CurrentValueCell = ({
   cell: CellContext<TableSuggestion, TableSuggestion['currentValue']>;
   allProperties: ClientPropertySchema[];
 }) => {
-  if (cell.row.original.state.obsolete) {
-    return (
-      <div className="flex gap-1 text-xs font-bold text-gray-500">
-        <span>
-          <Translate>Obsolete</Translate>
-        </span>
-      </div>
-    );
-  }
-
   if (cell.row.original.state.error) {
     return (
       <div className="flex gap-1 text-xs font-bold text-gray-500">
@@ -171,7 +169,7 @@ const AcceptButton = ({
   cell: Cell<TableSuggestion, string>;
   action: Function;
 }) => {
-  const [accepted, setAccepted] = useAtom(ixAcceptedSuggestions);
+  const [accepted, setAccepted] = useAtom(acceptedSuggestions);
   const { rowId } = cell.row.original;
   const isGreen = accepted?.has(rowId) || statusColor(cell.row.original) === 'green';
   const color = isGreen ? 'green' : statusColor(cell.row.original);
@@ -256,7 +254,9 @@ const TitleCell = ({ cell, row }: CellContext<TableSuggestion, TableSuggestion['
 );
 
 const SegmentCell = ({ cell, row }: CellContext<TableSuggestion, TableSuggestion['segment']>) => {
-  const segment = cell.getValue();
+  const suggestion = row.original;
+  const segmentText = get(suggestion.suggestedValue, 'segment');
+  const segment = segmentText || cell.getValue();
   if (row.getCanExpand()) {
     return null;
   }
@@ -267,7 +267,7 @@ const SegmentCell = ({ cell, row }: CellContext<TableSuggestion, TableSuggestion
       </span>
     );
   }
-  return segment;
+  return <ContextCell text={segment} />;
 };
 
 const extractorsTableColumns = [
